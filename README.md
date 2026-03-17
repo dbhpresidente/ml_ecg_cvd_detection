@@ -13,6 +13,50 @@ Machine Learning for ECG-based Cardiovascular Disease Detection.
 pip install -r requirements.txt
 ```
 
+## Data
+
+This project uses [PTB-XL](https://physionet.org/content/ptb-xl/1.0.3/) (Wagner et al., 2020) —
+21,837 12-lead ECGs from 18,885 patients, annotated with 71 diagnostic SCP codes grouped into
+5 superclasses: **NORM, MI, STTC, CD, HYP**.
+
+### Download
+
+```bash
+make download-ptbxl
+# or
+python scripts/download_data.py --workers 8
+```
+
+Downloads ~3 GB to `data/raw/ptb-xl/` (not tracked by git). Re-running resumes any interrupted download.
+
+### Loading the dataset
+
+```python
+from src.data.dataset import PTBXLDataset
+
+# Any CVD vs. NORM (default)
+dataset = PTBXLDataset("data/raw/ptb-xl")
+
+# Single superclass
+dataset = PTBXLDataset("data/raw/ptb-xl", positive_classes="MI")
+
+# Custom subset of superclasses
+dataset = PTBXLDataset("data/raw/ptb-xl", positive_classes=["MI", "STTC"])
+
+X_train, y_train = dataset.get_split("train")  # shape: (N, 12, 5000)
+X_val,   y_val   = dataset.get_split("val")
+X_test,  y_test  = dataset.get_split("test")
+
+print(dataset.class_distribution("train"))
+```
+
+Splits follow the official PTB-XL stratified folds: folds 1–8 = train, 9 = val, 10 = test.
+
+### Preprocessing
+
+The pipeline applied by default: bandpass filter (0.5–40 Hz) → notch filter (50 Hz) → z-score normalization per lead.
+Configurable via `PTBXLDataset` constructor arguments (`bandpass`, `notch`, `normalization`).
+
 ## Usage
 
 ```bash
