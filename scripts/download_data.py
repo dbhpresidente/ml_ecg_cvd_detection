@@ -1,15 +1,20 @@
 """Download script for ECG datasets from PhysioNet.
 
 Supports two download methods:
-- curl (default): recursive download with resume support, requires PhysioNet credentials.
-- wfdb: uses the wfdb library, no credentials needed but no resume support.
+- curl (default): parallel download with resume support, no credentials needed
+  for open-access datasets like PTB-XL.
+- wfdb: uses the wfdb library, sequential, no resume support.
 
 Usage:
-    python scripts/download_data.py --user <physionet_user> --password <physionet_pass>
+    python scripts/download_data.py
+    python scripts/download_data.py --workers 8
     python scripts/download_data.py --method wfdb
 """
 import argparse
+import re
 import subprocess
+import urllib.parse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 DATASETS = {
@@ -43,14 +48,10 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Download PTB-XL with curl (resumable, requires PhysioNet account):
-  python scripts/download_data.py --user myuser --password mypass
-
-  # Download without credentials (no resume support):
-  python scripts/download_data.py --method wfdb
-
-  # Download MIT-BIH instead:
-  python scripts/download_data.py --dataset mitbih --user myuser --password mypass
+  python scripts/download_data.py                        # PTB-XL, 4 workers
+  python scripts/download_data.py --workers 8            # faster with more connections
+  python scripts/download_data.py --dataset mitbih
+  python scripts/download_data.py --method wfdb          # fallback, no parallelism
         """,
     )
     parser.add_argument(
@@ -69,63 +70,34 @@ Examples:
         "--method",
         choices=["curl", "wfdb"],
         default="curl",
-        help="Download method: curl (resumable, needs credentials) or wfdb (default: curl)",
+        help="Download method (default: curl)",
     )
-    parser.add_argument("--user", type=str, default=None, help="PhysioNet username")
-    parser.add_argument("--password", type=str, default=None, help="PhysioNet password")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="Number of parallel download workers (default: 4)",
+    )
+    parser.add_argument("--user", type=str, default=None, help="PhysioNet username (if required)")
+    parser.add_argument("--password", type=str, default=None, help="PhysioNet password (if required)")
     return parser.parse_args()
 
 
-def download_curl(
-    dataset_key: str,
-    output_dir: Path,
-    user: str | None = None,
-    password: str | None = None,
-) -> None:
-    """Download a PhysioNet dataset using curl with resume support.
-
-    Uses recursive download (-r), timestamping to skip existing files (-N),
-    and resume (-C -) to continue interrupted downloads.
+def _fetch_file_list(
+    url: str,
+    target_dir: Path,
+    auth_flags: list[str],
+) -> list[tuple[str, Path]]:
+    """Recursively fetch the full list of (url, local_path) pairs from a PhysioNet directory.
 
     Args:
-        dataset_key: Key from the DATASETS dictionary.
-        output_dir: Root directory where files will be saved.
-        user: PhysioNet username.
-        password: PhysioNet password.
+        url: PhysioNet directory URL to crawl.
+        target_dir: Local directory corresponding to this URL.
+        auth_flags: curl auth flags (empty list if no credentials needed).
+
+    Returns:
+        List of (remote_url, local_path) tuples for all files found.
     """
-    info = DATASETS[dataset_key]
-    target_dir = output_dir / dataset_key
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    url = info["url"]
-
-    print(f"Dataset  : {info['description']}")
-    print(f"Size     : ~{info['size_gb']} GB")
-    print(f"Target   : {target_dir.resolve()}")
-    print("Method   : curl (resumable)")
-    print()
-    print("Tip: if the download is interrupted, run the same command again to resume.\n")
-
-    _curl_recursive(url, target_dir, user, password)
-
-
-def _curl_recursive(url: str, target_dir: Path, user: str | None, password: str | None) -> None:
-    """Recursively download all files from a PhysioNet directory via curl.
-
-    Fetches the HTML index to discover files, then downloads each one
-    with resume support (-C -).
-
-    Args:
-        url: PhysioNet directory URL.
-        target_dir: Local directory to save files.
-        user: PhysioNet username.
-        password: PhysioNet password.
-    """
-    import re
-    import urllib.parse
-
-    # Fetch directory listing
-    auth_flags = ["--user", f"{user}:{password}"] if user and password else []
     result = subprocess.run(
         ["curl", "-s", *auth_flags, "-L", url],
         capture_output=True,
@@ -133,14 +105,13 @@ def _curl_recursive(url: str, target_dir: Path, user: str | None, password: str 
     )
 
     if result.returncode != 0:
-        print(f"Error fetching directory listing: {result.stderr}")
-        return
+        print(f"  [warn] could not fetch listing for {url}: {result.stderr.strip()}")
+        return []
 
-    # Parse hrefs from the HTML listing (PhysioNet uses Apache-style listings)
     hrefs = re.findall(r'href="([^"?#]+)"', result.stdout)
+    files: list[tuple[str, Path]] = []
 
     for href in hrefs:
-        # Skip parent directory links and absolute URLs
         if href.startswith(("/", "http", "?", "..")) or href == "/":
             continue
 
@@ -148,40 +119,123 @@ def _curl_recursive(url: str, target_dir: Path, user: str | None, password: str 
         local_path = target_dir / urllib.parse.unquote(href)
 
         if href.endswith("/"):
-            # It's a subdirectory — recurse
             local_path.mkdir(parents=True, exist_ok=True)
-            _curl_recursive(full_url, local_path, user, password)
+            files.extend(_fetch_file_list(full_url, local_path, auth_flags))
         else:
-            # It's a file — download with resume
-            if local_path.exists() and local_path.stat().st_size > 0:
-                print(f"  skip (exists): {local_path.relative_to(target_dir.parent.parent)}")
-                continue
+            files.append((full_url, local_path))
 
-            print(f"  downloading  : {href}")
-            local_path.parent.mkdir(parents=True, exist_ok=True)
-            subprocess.run(
-                [
-                    "curl",
-                    *auth_flags,
-                    "-L",
-                    "--retry", "10",
-                    "--retry-delay", "5",
-                    "--retry-all-errors",
-                    "-C", "-",
-                    "-o", str(local_path),
-                    "--progress-bar",
-                    full_url,
-                ],
-                check=False,
-            )
+    return files
 
-    print(f"\nDone. Dataset saved to: {target_dir.resolve()}")
+
+def _download_file(
+    url: str,
+    local_path: Path,
+    auth_flags: list[str],
+) -> tuple[str, bool, str]:
+    """Download a single file with resume support.
+
+    Args:
+        url: Remote file URL.
+        local_path: Local destination path.
+        auth_flags: curl auth flags.
+
+    Returns:
+        Tuple of (filename, success, message).
+    """
+    name = local_path.name
+
+    if local_path.exists() and local_path.stat().st_size > 0:
+        return name, True, "skipped (exists)"
+
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+
+    result = subprocess.run(
+        [
+            "curl",
+            *auth_flags,
+            "-L",
+            "--retry", "10",
+            "--retry-delay", "5",
+            "--retry-all-errors",
+            "-C", "-",
+            "-s",               # silent — progress handled by caller
+            "-o", str(local_path),
+            url,
+        ],
+        check=False,
+    )
+
+    if result.returncode != 0:
+        return name, False, f"failed (exit {result.returncode})"
+    return name, True, "done"
+
+
+def download_curl(
+    dataset_key: str,
+    output_dir: Path,
+    workers: int = 4,
+    user: str | None = None,
+    password: str | None = None,
+) -> None:
+    """Download a PhysioNet dataset using parallel curl workers.
+
+    First crawls the remote directory tree to collect all file URLs, then
+    downloads them in parallel. Already-downloaded files are skipped, so
+    re-running resumes an interrupted download.
+
+    Args:
+        dataset_key: Key from the DATASETS dictionary.
+        output_dir: Root directory where files will be saved.
+        workers: Number of parallel download threads.
+        user: PhysioNet username (optional for open-access datasets).
+        password: PhysioNet password (optional for open-access datasets).
+    """
+    info = DATASETS[dataset_key]
+    target_dir = output_dir / dataset_key
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    auth_flags = ["--user", f"{user}:{password}"] if user and password else []
+
+    print(f"Dataset  : {info['description']}")
+    print(f"Size     : ~{info['size_gb']} GB")
+    print(f"Target   : {target_dir.resolve()}")
+    print(f"Workers  : {workers}")
+    print()
+
+    print("Step 1/2 — Crawling remote directory tree...")
+    all_files = _fetch_file_list(info["url"], target_dir, auth_flags)
+    total = len(all_files)
+    print(f"          Found {total} files.\n")
+
+    already_done = sum(1 for _, p in all_files if p.exists() and p.stat().st_size > 0)
+    pending = total - already_done
+    print(f"Step 2/2 — Downloading {pending} files ({already_done} already cached)...")
+
+    completed = 0
+    failed: list[str] = []
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(_download_file, url, path, auth_flags): path.name
+            for url, path in all_files
+        }
+        for future in as_completed(futures):
+            name, success, msg = future.result()
+            completed += 1
+            status = "✓" if success else "✗"
+            print(f"  [{completed:>5}/{total}] {status} {name}  ({msg})")
+            if not success:
+                failed.append(name)
+
+    print(f"\nDone. {total - len(failed)} / {total} files saved to: {target_dir.resolve()}")
+    if failed:
+        print(f"\n[warn] {len(failed)} files failed — re-run to retry:")
+        for f in failed:
+            print(f"  {f}")
 
 
 def download_wfdb(dataset_key: str, output_dir: Path) -> None:
-    """Download a PhysioNet dataset using the wfdb library.
-
-    No credentials required, but does not support resuming interrupted downloads.
+    """Download a PhysioNet dataset using the wfdb library (sequential, no resume).
 
     Args:
         dataset_key: Key from the DATASETS dictionary.
@@ -195,7 +249,7 @@ def download_wfdb(dataset_key: str, output_dir: Path) -> None:
     print(f"Dataset  : {info['description']}")
     print(f"Size     : ~{info['size_gb']} GB")
     print(f"Target   : {target_dir.resolve()}")
-    print("Method   : wfdb (no resume support)")
+    print("Method   : wfdb (sequential, no resume support)")
     print()
 
     if target_dir.exists() and any(target_dir.iterdir()):
@@ -211,7 +265,7 @@ def main() -> None:
     args = parse_args()
 
     if args.method == "curl":
-        download_curl(args.dataset, args.output_dir, args.user, args.password)
+        download_curl(args.dataset, args.output_dir, args.workers, args.user, args.password)
     else:
         download_wfdb(args.dataset, args.output_dir)
 
