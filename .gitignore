@@ -205,3 +205,38 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ML / Data
+data/raw/
+data/processed/
+data/external/
+*.mat
+*.hea
+*.dat
+*.edf
+*.h5
+*.hdf5
+*.pkl
+*.npy
+*.npz
+
+# Model checkpoints & outputs
+checkpoints/
+outputs/
+mlruns/
+wandb/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Reports (generated)
+reports/figures/
+reports/*.html
+
+# Secrets
+.env
+*.key
+secrets/
+
+# Editor
+.vscode/

@@ -1,0 +1,30 @@
+experiment:
+  name: baseline
+  seed: 42
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+  sampling_rate: 500  # Hz
+  leads: 12
+
+model:
+  architecture: cnn_1d
+  num_classes: 2
+  dropout: 0.3
+
+training:
+  epochs: 50
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  early_stopping_patience: 10
+  optimizer: adamw
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/
+  log_interval: 10
