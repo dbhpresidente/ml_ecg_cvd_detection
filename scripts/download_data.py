@@ -222,7 +222,7 @@ def download_curl(
         for future in as_completed(futures):
             name, success, msg = future.result()
             completed += 1
-            status = "✓" if success else "✗"
+            status = "ok" if success else "!!"
             print(f"  [{completed:>5}/{total}] {status} {name}  ({msg})")
             if not success:
                 failed.append(name)
