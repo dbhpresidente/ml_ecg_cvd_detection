@@ -12,7 +12,6 @@ import argparse
 import subprocess
 from pathlib import Path
 
-
 DATASETS = {
     "ptb-xl": {
         "physionet_name": "ptb-xl",
@@ -103,28 +102,10 @@ def download_curl(
     print(f"Dataset  : {info['description']}")
     print(f"Size     : ~{info['size_gb']} GB")
     print(f"Target   : {target_dir.resolve()}")
-    print(f"Method   : curl (resumable)")
+    print("Method   : curl (resumable)")
     print()
     print("Tip: if the download is interrupted, run the same command again to resume.\n")
 
-    cmd = [
-        "curl",
-        "--user", f"{user}:{password}",
-        "-r", "-",           # resume from where it left off
-        "--retry", "10",     # retry up to 10 times on transient errors
-        "--retry-delay", "5",
-        "--retry-all-errors",
-        "-L",                # follow redirects
-        "--create-dirs",
-        "-O",                # save with original filename
-        "--output-dir", str(target_dir),
-        "--progress-bar",
-        # recursive mirror flags via wget-style glob — PhysioNet supports listing
-        url,
-    ]
-
-    # For recursive directory download, curl needs a different approach.
-    # We use curl to first fetch the file list, then download each file.
     _curl_recursive(url, target_dir, user, password)
 
 
@@ -214,7 +195,7 @@ def download_wfdb(dataset_key: str, output_dir: Path) -> None:
     print(f"Dataset  : {info['description']}")
     print(f"Size     : ~{info['size_gb']} GB")
     print(f"Target   : {target_dir.resolve()}")
-    print(f"Method   : wfdb (no resume support)")
+    print("Method   : wfdb (no resume support)")
     print()
 
     if target_dir.exists() and any(target_dir.iterdir()):
