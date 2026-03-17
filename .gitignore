@@ -237,3 +237,6 @@ reports/*.html
 .env
 *.key
 secrets/
+
+# Editor
+.vscode/
