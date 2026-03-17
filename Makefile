@@ -1,7 +1,10 @@
-.PHONY: train eval test lint format clean setup
+.PHONY: train eval test lint format clean setup download-ptbxl
 
 setup:
 	pip install -r requirements.txt
+
+download-ptbxl:
+	python scripts/download_data.py --dataset ptb-xl --output-dir data/raw
 
 train:
 	python scripts/train.py --config configs/default.yaml
