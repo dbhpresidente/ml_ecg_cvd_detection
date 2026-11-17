@@ -1,0 +1,22 @@
+experiment:
+  name: rf_baseline
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  sampling_rate: 500
+  leads: 12
+  positive_classes: [MI, STTC, CD, HYP]
+  min_confidence: 100.0
+
+model:
+  architecture: gradient_boosting  # logistic | random_forest | gradient_boosting
+  num_classes: 2
+
+# training section is ignored for sklearn baselines
+training:
+  epochs: 0
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

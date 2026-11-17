@@ -19,7 +19,7 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install ruff mypy pytest pytest-cov numpy scipy
+        run: pip install ruff mypy pytest pytest-cov numpy scipy scikit-learn pyyaml
 
       - name: Lint
         run: ruff check src/ tests/ scripts/

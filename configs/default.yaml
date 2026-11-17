@@ -1,18 +1,16 @@
 experiment:
-  name: baseline
+  name: cnn_baseline
   seed: 42
 
 data:
-  raw_dir: data/raw
-  processed_dir: data/processed
-  train_split: 0.7
-  val_split: 0.15
-  test_split: 0.15
-  sampling_rate: 500  # Hz
+  raw_dir: data/raw/ptb-xl
+  sampling_rate: 500  # Hz — use 100 for low-resolution records
   leads: 12
+  positive_classes: [MI, STTC, CD, HYP]  # any CVD vs. NORM
+  min_confidence: 100.0
 
 model:
-  architecture: cnn_1d
+  architecture: cnn_1d  # cnn_1d | logistic | random_forest | gradient_boosting
   num_classes: 2
   dropout: 0.3
 
@@ -22,9 +20,9 @@ training:
   learning_rate: 1.0e-3
   weight_decay: 1.0e-4
   early_stopping_patience: 10
-  optimizer: adamw
+  lr_scheduler_patience: 3
+  lr_scheduler_factor: 0.5
 
 logging:
   output_dir: outputs/
   checkpoint_dir: checkpoints/
-  log_interval: 10
