@@ -164,6 +164,40 @@ All citations are listed in alphabetical order by first author. DOIs are provide
 
 ---
 
+## 2025–2026 Literature
+
+[51] Morin J, et al. "SPEED-TR: Efficient Transformer for 12-Lead ECG Classification." *Conference Proceedings* (2025). [UNVERIFIED — verify exact venue, authors, and DOI before citing]
+
+[52] Kim S, et al. "Hybrid CNN + Transformer for ECG Spectrograms." *Scientific Reports* (2025). DOI: [10.1038/s41598-025-92582-9](https://doi.org/10.1038/s41598-025-92582-9)
+
+[53] "BHF ECG Image Challenge 2025 — 1st Place Solution." arXiv (2025). URL: [arxiv.org/abs/2507.21968](https://arxiv.org/abs/2507.21968) [UNVERIFIED — verify authors before citing]
+
+[54] "Pic2Diagnosis: ECG Image Diagnosis System." *Conference/arXiv* (2025). [UNVERIFIED — verify exact arXiv ID, authors, and venue before citing]
+
+[55] Nam J, et al. "VizECGNet: Cross-Modal Attention for ECG Image Classification." *ICIP* (2024). URL: [arxiv.org/abs/2408.02888](https://arxiv.org/abs/2408.02888)
+
+[56] "PhysioNet/CinC Challenge 2024 — ECG Digitization and Classification." *PhysioNet/CinC* (2024). URL: [physionet.org/content/challenge-2024/](https://physionet.org/content/challenge-2024/) [UNVERIFIED — verify exact citation format]
+
+[57] Song Y, Zheng W, Chen T, Wang Z, Shi J, Chen Y. "Deep Neural Network Architectures for ECG Classification: A Comprehensive Evaluation." arXiv (2026). URL: [arxiv.org/abs/2602.17701](https://arxiv.org/abs/2602.17701)
+
+[58] "AI-HEART: End-to-End Digital Health System for ECG Analysis." arXiv (2026). URL: [arxiv.org/abs/2603.16891](https://arxiv.org/abs/2603.16891) [UNVERIFIED — verify authors before citing]
+
+[59] "ECG Classification on PTB-XL: A Data-Centric Approach with Simplified CNN-VAE." arXiv (2026). URL: [arxiv.org/abs/2603.07558](https://arxiv.org/abs/2603.07558) [UNVERIFIED — verify authors before citing]
+
+[60] "ECG-MoE: Mixture-of-Expert ECG Foundation Model." arXiv (2026). URL: [arxiv.org/abs/2603.04589](https://arxiv.org/abs/2603.04589) [UNVERIFIED — verify authors before citing]
+
+[61] "ECG Classification with Transformers Using Koopman and Wavelet Features." arXiv (2026). URL: [arxiv.org/abs/2603.08339](https://arxiv.org/abs/2603.08339) [UNVERIFIED — verify authors before citing]
+
+[62] Ben-Baruch E, Ridnik T, Zamir N, et al. "Asymmetric Loss For Multi-Label Classification." *ICCV* (2021). URL: [arxiv.org/abs/2009.14119](https://arxiv.org/abs/2009.14119)
+
+[63] Liu Z, Mao H, Wu C-Y, et al. "A ConvNet for the 2020s." *CVPR* (2022). URL: [arxiv.org/abs/2201.03545](https://arxiv.org/abs/2201.03545)
+
+[64] Ilse M, Tomczak J, Welling M. "Attention-based Deep Multiple Instance Learning." *ICML* (2018). URL: [arxiv.org/abs/1802.04712](https://arxiv.org/abs/1802.04712)
+
+[65] Smith LN. "Super-Convergence: Very Fast Training of Neural Networks Using Large Learning Rates." *arXiv* (2018). URL: [arxiv.org/abs/1803.09820](https://arxiv.org/abs/1803.09820)
+
+---
+
 ## Notes
 
 - Items marked **[UNVERIFIED]** were identified by literature search agents as potentially valid references but could not be fully confirmed with a resolvable DOI or URL. These should be independently verified via PubMed, Google Scholar, or arXiv before inclusion in a manuscript.

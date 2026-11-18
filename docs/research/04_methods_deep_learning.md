@@ -59,6 +59,10 @@ Macro AUC on PTB-XL diagnostic superclass task (fold 10 test set, min. confidenc
 
 > Fawaz HI, et al. "InceptionTime: Finding AlexNet for Time Series Classification." *Data Mining and Knowledge Discovery* 34, 1936–1962 (2020). URL: [arxiv.org/abs/1909.04939](https://arxiv.org/abs/1909.04939)
 
+**2026 results — Song et al. (2026):** Comprehensive evaluation of CNN architectures on MIT-BIH. The best-performing configuration was a CNN-LSTM hybrid with macro F1 = **0.951**, outperforming standalone CNNs and LSTMs evaluated in the same study.
+
+> Song Y, Zheng W, Chen T, Wang Z, Shi J, Chen Y. "Deep Neural Network Architectures for ECG Classification: A Comprehensive Evaluation." *arXiv:2602.17701* (2026). URL: [arxiv.org/abs/2602.17701](https://arxiv.org/abs/2602.17701) [UNVERIFIED — verify venue before citing]
+
 ---
 
 ## 3. RNN-Based Architectures
@@ -84,7 +88,7 @@ Recurrent networks capture sequential dependencies in ECG signals:
 
 ## 4. Transformer and Attention Architectures
 
-### 4.1 General Trends (2022–2025)
+### 4.1 General Trends (2022–2026)
 
 Transformers have been applied to ECG via two main strategies:
 1. **Treat ECG leads as sequence tokens** (patch-based, similar to Vision Transformer).
@@ -101,6 +105,18 @@ A comprehensive survey documents the rapid advances: "A survey of transformers a
 **CardioPatternFormer (2025):** Pattern-guided attention for interpretable ECG classification; designed to discern subtle anomalies and multiple co-occurring conditions.
 
 > "CardioPatternFormer: Pattern-Guided Attention for Interpretable ECG Classification with Transformer Architecture." *arXiv:2505.20481* (2025). URL: [arxiv.org/abs/2505.20481](https://arxiv.org/abs/2505.20481)
+
+**SPEED-TR (Morin et al., 2025):** Efficient Transformer architecture designed for clinical 12-lead ECG, reducing computational cost while maintaining strong diagnostic accuracy. Targets deployment in resource-constrained clinical settings.
+
+> Morin J, et al. "SPEED-TR: Efficient Transformer for 12-Lead ECG." *Conf.* (2025). [UNVERIFIED — verify exact venue and DOI before citing]
+
+**Kim et al. (2025) — Hybrid CNN + Transformer for ECG spectrograms:** Converts ECG signals to 2D spectrograms and applies a hybrid CNN-Transformer. Evaluated on MIT-BIH + Icentia11k, achieving high AUC and F1. Demonstrates viability of 2D image-based representations even for Transformer architectures.
+
+> Kim S, et al. "Hybrid CNN + Transformer for ECG spectrograms." *Scientific Reports* (2025). DOI: [10.1038/s41598-025-92582-9](https://doi.org/10.1038/s41598-025-92582-9)
+
+**Koopman + Wavelet Transformer (2026):** Feeds physically motivated features (Koopman operator decomposition + wavelet coefficients) as input tokens to a Transformer encoder, rather than raw samples. Improves classification performance and links to interpretable signal components.
+
+> "ECG Classification with Transformers Using Koopman and Wavelet Features." *arXiv:2603.08339* (2026). URL: [arxiv.org/abs/2603.08339](https://arxiv.org/abs/2603.08339) [UNVERIFIED — verify venue before citing]
 
 ### 4.3 Comparison with CNNs
 
@@ -190,6 +206,16 @@ A 2025 benchmark of ECG foundation models found that **ECG-CPC (3.8M params)** a
 
 > "Benchmarking ECG Foundational Models: A Reality Check Across Clinical Tasks." *arXiv:2509.25095* (2025). URL: [arxiv.org/html/2509.25095v1](https://arxiv.org/html/2509.25095v1)
 
+### 6.5 ECG-MoE (2026) — Mixture-of-Experts Foundation Model
+
+The first MoE architecture applied to ECG foundation modelling. Rather than activating all parameters for every input, ECG-MoE routes each sample to a subset of specialised expert networks, enabling breadth without proportional compute cost.
+
+- **Training data:** 5 clinical datasets (multi-task: arrhythmia, MI, HF, and other diagnoses).
+- **Architecture:** MoE + Transformer; sparse expert routing.
+- **Result:** SOTA on all 5 downstream tasks simultaneously; inference **40% faster** than a dense model of equivalent capacity.
+
+> "ECG-MoE: Mixture-of-Expert ECG Foundation Model." *arXiv:2603.04589* (2026). URL: [arxiv.org/abs/2603.04589](https://arxiv.org/abs/2603.04589) [UNVERIFIED — verify venue before citing]
+
 ---
 
 ## 7. Task-Specific Deep Learning Models
@@ -229,6 +255,12 @@ Federated CNN-LSTM models across multiple centres reported internal-test AUC of 
 Substantially outperformed the conventional ECG electrical risk score (AUROC 0.712/0.743).
 
 > Holmstrom L, Chugh H, Nakamura K, et al. "An ECG-based artificial intelligence model for assessment of sudden cardiac death risk." *Communications Medicine* 4, 55 (2024). DOI: [10.1038/s43856-024-00451-9](https://doi.org/10.1038/s43856-024-00451-9)
+
+### 7.5 AI-HEART (2026) — End-to-End Production System
+
+**AI-HEART** demonstrates a complete end-to-end digital health pipeline for ECG analysis, integrating a CNN-based inference model with a cloud deployment architecture. Provides a reference design for production-grade ECG AI systems, covering data ingestion, model inference, and clinical reporting.
+
+> "AI-HEART: End-to-End Digital Health System for ECG Analysis." *arXiv:2603.16891* (2026). URL: [arxiv.org/abs/2603.16891](https://arxiv.org/abs/2603.16891) [UNVERIFIED — verify venue before citing]
 
 ---
 

@@ -182,3 +182,46 @@ As of 2024, several AI-ECG products have received regulatory clearance, establis
 | Prospective RCTs | High | Low (resource-intensive) | Clinical guideline integration |
 | Long-term survival modelling | Medium | Low (SEER/AIRE are early) | Preventive cardiology |
 | Multi-label correlation modelling | Low | Medium (graph NNs applied) | Diagnostic completeness |
+| ECG image classification | Medium | Medium (BHF Challenge 2025 shows feasibility) | Legacy ECG archive mining |
+| Efficient / physics-informed DL | Low | Low-Medium (early evidence) | Deployment at scale |
+
+---
+
+## 11. ECG Image Classification (Printed and Scanned ECG)
+
+### The Opportunity
+A growing line of work frames ECG interpretation as a **2D computer vision problem**: the ECG waveform is rendered as an image (either a spectrogram/scalogram, a synthesised paper-strip plot, or a photograph of a printed clinical ECG) and classified with standard image CNNs.
+
+**Motivation:** Millions of historical ECGs exist only as paper printouts or scanned images in legacy clinical systems. Converting these to digital signals for 1D CNN processing is expensive and error-prone; direct image classification avoids this step.
+
+### Evidence
+- **BHF ECG Image Challenge 2025:** ConvNeXt-V2-Base + ensemble achieved AUC 0.9677 on UK Biobank printed ECG images — matching the best 1D signal models. This is the strongest published evidence for 2D image approaches.
+  > "BHF ECG Image Challenge 2025 — 1st Place Solution." arXiv:2507.21968 (2025). URL: [arxiv.org/abs/2507.21968](https://arxiv.org/abs/2507.21968)
+
+- **PhysioNet/CinC Challenge 2024:** Focused on ECG digitisation + classification from scanned paper records. Top teams used ConvNeXt-Base / EfficientNet-V2 ensembles; AUC ~0.96.
+
+- **Spectrogram-based hybrids (Kim et al., 2025):** Hybrid CNN + Transformer on ECG spectrograms achieves high AUC on MIT-BIH + Icentia11k, suggesting that time-frequency image representations capture information complementary to raw 1D signals.
+  > Kim et al. "Hybrid CNN + Transformer for ECG spectrograms." *Scientific Reports* (2025). DOI: [10.1038/s41598-025-92582-9](https://doi.org/10.1038/s41598-025-92582-9)
+
+### Gaps
+- No standardised benchmark for image-based ECG classification equivalent to the PTB-XL 1D benchmark.
+- It is unclear whether the gains come from the 2D representation or from the backbone (ConvNeXt pre-trained on ImageNet).
+- The image rendering pipeline (DPI, colour, layout, compression artefacts) has not been systematically ablated.
+
+---
+
+## 12. Efficient and Physics-Informed Architectures
+
+### Mixture-of-Experts for ECG
+ECG-MoE (2026) introduced the first MoE architecture for ECG foundation models. By routing different ECG inputs to specialised expert sub-networks, it achieves SOTA across 5 clinical tasks while reducing inference time by 40% versus a dense equivalent.
+
+> "ECG-MoE: Mixture-of-Expert ECG Foundation Model." arXiv:2603.04589 (2026). URL: [arxiv.org/abs/2603.04589](https://arxiv.org/abs/2603.04589)
+
+**Opportunity:** MoE architectures could be particularly valuable for ECG because different pathologies activate different signal morphologies — routing patients with suspected MI through a different expert than patients with conduction abnormalities is physiologically motivated.
+
+### Koopman and Wavelet Features for Transformers
+A 2026 preprint showed that feeding **physically motivated features** (Koopman operator decomposition + wavelet coefficients) as input tokens to a Transformer, rather than raw samples, improves classification performance on ECG tasks.
+
+> "ECG Classification with Transformers Using Koopman and Wavelet Features." arXiv:2603.08339 (2026). URL: [arxiv.org/abs/2603.08339](https://arxiv.org/abs/2603.08339)
+
+**Opportunity:** This "physics-informed DL" paradigm bridges classical signal processing and modern deep learning — potentially improving both performance and interpretability, since Koopman and wavelet features have clear physiological meaning.

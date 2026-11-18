@@ -49,6 +49,14 @@ The PTB-XL benchmark (Strodthoff et al., 2021) is the standard reference for com
 
 HYP (Hypertrophy) consistently achieves the lowest AUC, likely due to its lower prevalence and subtler waveform morphology.
 
+### 1.4 Recent PTB-XL Results (2026)
+
+| Model | Accuracy | F1 | Notes |
+|---|---|---|---|
+| CNN-VAE (197K params) | 87.01% | 0.745 | Data-centric approach; arXiv:2603.07558 (2026) [UNVERIFIED] |
+
+> Note: This result is below SOTA (xresnet1d101 AUC 0.937) but achieves it with a dramatically smaller model (197K vs ~5M parameters), demonstrating that data-centric approaches can reach competitive performance on lightweight architectures.
+
 ---
 
 ## 2. PhysioNet/CinC Challenge Results
@@ -115,11 +123,38 @@ HYP (Hypertrophy) consistently achieves the lowest AUC, likely due to its lower 
 
 > Chen TM, Huang CH, Shih ESC, Hwang MJ. "Detection and Classification of Cardiac Arrhythmias by a Challenge-Best Deep Learning Neural Network Model." *iScience* 23(3), 100886 (2020). DOI: [10.1016/j.isci.2020.100886](https://doi.org/10.1016/j.isci.2020.100886)
 
+#### 3a. MIT-BIH 2026 Architecture Comparison
+
+| Architecture | F1 | Notes |
+|---|---|---|
+| CNN-LSTM | 0.951 | Best architecture (Yun Song et al., 2026) |
+| ResNet-1D | ~0.94 | Reference |
+| CNN | ~0.93 | Baseline |
+
+> Song Y, Zheng W, et al. "Deep Neural Network Architectures for ECG Classification: A Comprehensive Evaluation." arXiv:2602.17701 (2026). URL: [arxiv.org/abs/2602.17701](https://arxiv.org/abs/2602.17701) [UNVERIFIED — verify authors before citing]
+
 ---
 
-## 4. Specific Condition Results
+## 4. BHF ECG Image Challenge 2025
 
-### 4.1 Atrial Fibrillation Detection
+Challenge introducing ECG-as-image classification on UK Biobank printed ECG photographs. Established a new benchmark for 2D image-based ECG classification.
+
+| Rank | Team / Method | AUC | F1 | Architecture | Dataset |
+|---|---|---|---|---|---|
+| 1 | BHF 1st place | 0.9677 | ~0.93 | ConvNeXt-V2-Base + ensemble | UK Biobank ECG images |
+| 2 | Pic2Diagnosis | 0.9534 | 0.7801 | Ensemble (×3) | BHF ECG dataset |
+
+> "BHF ECG Image Challenge 2025 — 1st Place Solution." arXiv (2025). URL: [arxiv.org/abs/2507.21968](https://arxiv.org/abs/2507.21968) [UNVERIFIED — verify authors before citing]
+
+> "Pic2Diagnosis: ECG Image Diagnosis System." arXiv (2025). [UNVERIFIED — verify exact arXiv ID and authors before citing]
+
+**Key takeaway:** ConvNeXt-V2 architecture dominates — same backbone that excels on ImageNet generalises effectively to printed ECG photographs. AUC 0.9677 is the highest reported for image-based ECG classification as of 2025, matching the best 1D signal models on this task.
+
+---
+
+## 5. Specific Condition Results
+
+### 5.1 Atrial Fibrillation Detection
 
 | Study | Dataset | Model | AUC / F1 |
 |---|---|---|---|
@@ -127,7 +162,7 @@ HYP (Hypertrophy) consistently achieves the lowest AUC, likely due to its lower 
 | Ribeiro et al. (2020) | CODE-15% | ResNet (6-layer) | F1 0.983 (AF) |
 | Schwab et al. | CinC 2017 | LSTM + attention | AUC 0.978 |
 
-### 4.2 Left Ventricular Dysfunction (EF ≤35%)
+### 5.2 Left Ventricular Dysfunction (EF ≤35%)
 
 | Study | Dataset | Model | AUC |
 |---|---|---|---|
@@ -137,7 +172,7 @@ HYP (Hypertrophy) consistently achieves the lowest AUC, likely due to its lower 
 
 > Attia ZI, et al. "Screening for cardiac contractile dysfunction using an artificial intelligence-enabled electrocardiogram." *Nature Medicine* 25, 70–74 (2019). DOI: [10.1038/s41591-018-0240-2](https://doi.org/10.1038/s41591-018-0240-2)
 
-### 4.3 Long-Term Mortality Prediction
+### 5.3 Long-Term Mortality Prediction
 
 | System | Dataset | Model | C-index / AUC |
 |---|---|---|---|
@@ -153,7 +188,7 @@ HYP (Hypertrophy) consistently achieves the lowest AUC, likely due to its lower 
 
 ---
 
-## 5. Foundation Model Benchmarks
+## 6. Foundation Model Benchmarks
 
 Foundation models pre-trained on millions of ECGs are increasingly evaluated on PTB-XL and clinical tasks. Results from a systematic arXiv preprint comparing ECG foundation models (2025):
 
@@ -162,6 +197,7 @@ Foundation models pre-trained on millions of ECGs are increasingly evaluated on 
 | ECGFounder | 10M+ ECGs (private) | ~0.930 | >100M |
 | ECG-FM | 1.6M ECGs (MIMIC-IV-ECG) | ~0.925 | 90.9M |
 | HuBERT-ECG | 9.1M ECGs (CODE dataset) | ~0.928 | — |
+| ECG-MoE | 5 clinical datasets (multi-domain) | SOTA (5 tasks) | MoE+Transformer | arXiv:2603.04589 (2026) [UNVERIFIED] |
 | Supervised xresnet1d101 | PTB-XL only | 0.937 | ~5M |
 
 > Note: Foundation model results on PTB-XL vary by fine-tuning protocol and are not always directly comparable to the Strodthoff benchmark due to differences in preprocessing. See individual papers for exact experimental conditions.
@@ -170,21 +206,21 @@ Foundation models pre-trained on millions of ECGs are increasingly evaluated on 
 
 ---
 
-## 6. Evaluation Methodology Notes
+## 7. Evaluation Methodology Notes
 
-### 6.1 Class Imbalance
+### 7.1 Class Imbalance
 PTB-XL is moderately imbalanced (HYP: 12.1% prevalence). Best practices include:
 - Reporting macro-averaged AUC (treats all classes equally).
 - Stratified k-fold splitting by patient ID (not record ID) to prevent data leakage.
 - Using AUPRC (area under precision-recall curve) as an additional metric for rare classes.
 
-### 6.2 Patient-Independent Splits
+### 7.2 Patient-Independent Splits
 Using patient-level splits (as in PTB-XL folds 1–10) is mandatory. Record-level splits can artificially inflate performance by leaking the same patient's ECGs into train and test.
 
-### 6.3 Calibration
+### 7.3 Calibration
 Several studies report that neural networks on ECG data are over-confident (high confidence for wrong predictions). Platt scaling and temperature calibration are rarely applied but recommended before clinical use.
 
-### 6.4 Metric Selection
+### 7.4 Metric Selection
 - **Multi-label:** Macro-averaged AUC is standard (treats each label independently).
 - **Challenge metrics:** PhysioNet 2020/2021 use a custom weighted accuracy that awards partial credit for clinically similar confusions — this is not interchangeable with macro AUC.
 - **Binary (single condition):** AUC, sensitivity, specificity, and F1 are all commonly reported. Sensitivity/specificity at a clinical operating point (e.g., sensitivity ≥85%) is most clinically relevant.

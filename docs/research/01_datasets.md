@@ -14,6 +14,7 @@
 | **CPSC 2018** | 6,877 | — | 12 | 500 | 6–60 s | 9 rhythm classes | Open | Via PhysioNet (CinC 2020) |
 | **Georgia** | 10,344 | — | 12 | 500 | 5–10 s | 67 SNOMED-CT codes | Open | Via PhysioNet (CinC 2020) |
 | **Ningbo** | ~34,905 | — | 12 | 500 | Variable | Multi-label, standardised statements | Open | [10.1038/s41597-022-01403-5](https://doi.org/10.1038/s41597-022-01403-5) |
+| **UK Biobank ECG** | ~90,000 | ~90,000 | 12 | 500 | 10 s | Cardiac conditions (image format for BHF Challenge 2025) | Application-based | [ukbiobank.ac.uk](https://www.ukbiobank.ac.uk/) |
 
 ---
 
@@ -149,6 +150,10 @@ These datasets are used for traditional risk score modeling and for multi-modal 
 - **Other modalities:** Cardiac MRI, genotyping (500K SNP array), blood biomarkers, lifestyle questionnaires, linked hospital records (ICD-coded outcomes).
 - **CVD applications:** Deep learning models for ECG heart age prediction, AF risk estimation, left ventricular hypertrophy prediction, coronary artery calcification scoring, MACE prediction.
 - **Access:** Application-based at [ukbiobank.ac.uk](https://www.ukbiobank.ac.uk/).
+
+**BHF ECG Image Challenge 2025:** The British Heart Foundation sponsored an ECG image classification challenge using UK Biobank printed ECG photographs. The winning solution (ConvNeXt-V2-Base + ensemble) achieved AUC 0.9677 and F1 ~0.93 — matching the best 1D signal models. This challenge established a new benchmark for 2D image-based ECG classification and demonstrated that ImageNet-pretrained vision models transfer effectively to ECG interpretation tasks.
+
+> "BHF ECG Image Challenge 2025 — 1st Place Solution." arXiv:2507.21968 (2025). URL: [arxiv.org/abs/2507.21968](https://arxiv.org/abs/2507.21968) [UNVERIFIED — verify authors before citing]
 
 ### 3.2 NHANES
 

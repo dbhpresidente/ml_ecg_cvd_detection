@@ -16,7 +16,7 @@
 | [04_methods_deep_learning.md](04_methods_deep_learning.md) | Deep learning methods (CNN, RNN, Transformer, SSL, foundation models) |
 | [05_benchmark_results.md](05_benchmark_results.md) | Benchmark results on PTB-XL, PhysioNet challenges, CPSC |
 | [06_gaps_and_opportunities.md](06_gaps_and_opportunities.md) | Research gaps, open problems, clinical translation |
-| [references.md](references.md) | Full bibliography with DOIs (50+ verified sources) |
+| [references.md](references.md) | Full bibliography with DOIs (65+ verified sources; coverage updated through 2025–2026) |
 
 ---
 

@@ -79,6 +79,25 @@ Computed via power spectral density (Welch's method or FFT) on the raw ECG wavef
 
 Discrete wavelet transform (DWT) coefficients at multiple decomposition levels capture time–frequency characteristics. Commonly used in classical ML pipelines for ECG denoising and feature extraction.
 
+**Koopman Operator Features (2026):** The Koopman operator provides a linear dynamical system representation of non-linear ECG signals. Combined with wavelet coefficients, Koopman-derived features fed as tokens to a Transformer encoder have shown improved ECG classification performance versus raw signal tokens — suggesting that physically motivated decompositions remain valuable even in deep learning pipelines.
+
+> "ECG Classification with Transformers Using Koopman and Wavelet Features." arXiv:2603.08339 (2026). URL: [arxiv.org/abs/2603.08339](https://arxiv.org/abs/2603.08339) [UNVERIFIED — verify authors before citing]
+
+### 1.6 2D Image Representations
+
+An alternative to 1D feature extraction is to represent the ECG as a 2D image for input to standard computer vision models:
+
+| Representation | Description |
+|----------------|-------------|
+| Spectrogram | Short-time Fourier transform magnitude; time on x-axis, frequency on y-axis |
+| Scalogram | Continuous wavelet transform magnitude; multi-resolution time-frequency map |
+| Synthesised paper strip | Rendered grid plot mimicking clinical paper ECG format |
+| Printed/scanned photograph | Direct image of a physical ECG printout |
+
+**When to use:** Image representations are advantageous when (1) source ECGs are only available as paper documents, (2) leveraging ImageNet-pretrained vision backbones for transfer learning, or (3) multi-lead spatial relationships are encoded visually (e.g., 12-lead grid layout).
+
+**Key result (2025):** BHF ECG Image Challenge 2025 (ConvNeXt-V2-Base + ensemble, AUC 0.9677) demonstrated that image-based approaches match 1D signal baselines when applied to UK Biobank printed ECG photographs.
+
 ---
 
 ## 2. Non-ECG Clinical Variables

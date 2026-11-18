@@ -80,6 +80,10 @@ The following summarises performance ranges reported across classical ML studies
 
 **On PTB-XL (multi-label diagnostic task):** Strodthoff et al. (2021) report that the best classical baseline (Wavelet + NN) achieves macro AUC of 0.849, compared to 0.925 for the best deep learning architecture. Deep learning outperforms classical ML "by a large margin."
 
+**2026 update:** A comprehensive evaluation on MIT-BIH (Yun Song et al., 2026) confirmed that CNN-LSTM hybrids now achieve F1 = 0.951 — the best single-architecture result on that benchmark — further widening the gap with classical SVM and tree-based approaches (SVM ~0.65 F1, RF ~0.84–0.90 F1). This reinforces that the classical ML ceiling on well-studied benchmarks has been reached.
+
+> Song Y, et al. "Deep Neural Network Architectures for ECG Classification: A Comprehensive Evaluation." *arXiv:2602.17701* (2026). URL: [arxiv.org/abs/2602.17701](https://arxiv.org/abs/2602.17701) [UNVERIFIED — verify authors and DOI before citing]
+
 ---
 
 ## 5. Limitations of Classical ML for ECG
