@@ -177,6 +177,59 @@ def _train_cnn(cfg: dict, dataset, run_dir: Path, checkpoint_dir: Path) -> None:
         _save_json(val_metrics, run_dir / "metrics_val.json")
 
 
+def _train_xresnet(cfg: dict, dataset, run_dir: Path, checkpoint_dir: Path) -> None:
+    """Train XResNet1D-50 or XResNet1D-101 in multilabel mode."""
+    try:
+        from src.models.xresnet1d import xresnet1d50, xresnet1d101
+        from src.training.trainer import Trainer, TrainerConfig
+    except ImportError as exc:
+        raise SystemExit("PyTorch is required for XResNet training: pip install torch") from exc
+
+    model_cfg = cfg["model"]
+    architecture = model_cfg["architecture"]
+
+    factory = {"xresnet1d50": xresnet1d50, "xresnet1d101": xresnet1d101}[architecture]
+    model = factory(
+        n_leads=cfg["data"].get("leads", 12),
+        n_classes=model_cfg["num_classes"],
+        kernel_size=model_cfg.get("kernel_size", 5),
+        dropout=model_cfg.get("dropout", 0.5),
+    )
+    logger.info("%s: %s parameters", architecture, f"{model.count_parameters():,}")
+
+    trainer_cfg = TrainerConfig.from_dict({
+        **cfg.get("training", {}),
+        "checkpoint_dir": checkpoint_dir,
+        "device": "auto",
+    })
+
+    logger.info("=== %s training ===", architecture)
+    logger.info("Loading train split...")
+    X_train, y_train = dataset.get_split("train")
+    logger.info("Train: %d records  labels shape: %s", len(X_train), y_train.shape)
+    logger.info("Loading val split...")
+    X_val, y_val = dataset.get_split("val")
+
+    trainer = Trainer(model, trainer_cfg)
+    history = trainer.fit(X_train, y_train, X_val, y_val)
+
+    _save_json({"history": history}, run_dir / "history.json")
+
+    best_ckpt = checkpoint_dir / "best.pt"
+    if best_ckpt.exists():
+        trainer.load_checkpoint(best_ckpt)
+        val_metrics = trainer.evaluate(X_val, y_val)
+        logger.info(
+            "[val (best ckpt)]  macro_auc=%.4f | %s",
+            val_metrics.get("macro_auc", float("nan")),
+            "  ".join(
+                f"{c}:{val_metrics.get('per_class_auc', {}).get(c, float('nan')):.3f}"
+                for c in ["NORM", "MI", "STTC", "CD", "HYP"]
+            ),
+        )
+        _save_json(val_metrics, run_dir / "metrics_val.json")
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -224,6 +277,7 @@ def main() -> None:
     try:
         dataset = PTBXLDataset(
             data_dir=data_dir,
+            mode=cfg["data"].get("mode", "binary"),
             positive_classes=cfg["data"].get("positive_classes", ["MI", "STTC", "CD", "HYP"]),
             sampling_rate=cfg["data"]["sampling_rate"],
             min_confidence=cfg["data"].get("min_confidence", 100.0),
@@ -235,15 +289,21 @@ def main() -> None:
         ) from exc
 
     logger.info("Dataset loaded. Class distribution: %s", dataset.class_distribution())
+    report = dataset.validate_splits()
+    logger.info("Split validation: %s", report)
+
+    xresnet_architectures = {"xresnet1d50", "xresnet1d101"}
 
     if architecture in BASELINE_NAMES:
         _train_baseline(cfg, dataset, run_dir)
     elif architecture == "cnn_1d":
         _train_cnn(cfg, dataset, run_dir, checkpoint_dir)
+    elif architecture in xresnet_architectures:
+        _train_xresnet(cfg, dataset, run_dir, checkpoint_dir)
     else:
         raise SystemExit(
             f"Unknown architecture: '{architecture}'. "
-            f"Choose from: cnn_1d, {', '.join(BASELINE_NAMES)}"
+            f"Choose from: cnn_1d, xresnet1d50, xresnet1d101, {', '.join(BASELINE_NAMES)}"
         )
 
     logger.info("Done. Outputs saved to %s", run_dir)

@@ -1,0 +1,43 @@
+# xresnet_v2.yaml — XResNet1D-101 multilabel, v2: overfitting fixes
+#
+# Changes vs v1 (macro AUC 0.9133, overfit ep20+):
+#   - lr: 1e-3 → 1e-4  (slower descent, less aggressive overfitting)
+#   - weight_decay: 1e-4 → 1e-3  (stronger L2 regularisation)
+#   - augment: true  (amplitude scaling + Gaussian noise + lead dropout)
+#   - early_stopping_patience: 15 → 20  (more room before stopping)
+#   - warmup_epochs: 5 → 3  (shorter warmup with lower LR)
+
+experiment:
+  name: xresnet1d101_v2
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+
+model:
+  architecture: xresnet1d101
+  num_classes: 5
+  kernel_size: 5
+  dropout: 0.5
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 100
+  batch_size: 32
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-3
+  early_stopping_patience: 20
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: cosine
+  warmup_epochs: 3
+  augment: true
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

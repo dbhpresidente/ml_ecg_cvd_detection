@@ -12,6 +12,10 @@ import wfdb
 
 ALL_CVD_CLASSES: list[str] = ["MI", "STTC", "CD", "HYP"]
 
+#: Ordered PTB-XL diagnostic superclasses used for multi-label targets.
+#: Column index matches the multi-label array returned by get_multilabel().
+SUPERCLASSES: list[str] = ["NORM", "MI", "STTC", "CD", "HYP"]
+
 
 def load_metadata(data_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load PTB-XL metadata and SCP statement definitions.
@@ -117,6 +121,36 @@ def get_labels(
             ]
 
     return records_df.scp_codes.apply(extract_labels)
+
+
+def get_multilabel(
+    records_df: pd.DataFrame,
+    scp_df: pd.DataFrame,
+    min_confidence: float = 0.0,
+) -> np.ndarray:
+    """Extract multi-label array for the 5 PTB-XL diagnostic superclasses.
+
+    Column order matches SUPERCLASSES: NORM(0), MI(1), STTC(2), CD(3), HYP(4).
+    A record may have multiple active labels (e.g. MI + STTC co-occurring).
+
+    Args:
+        records_df: DataFrame from load_metadata().
+        scp_df: SCP statements DataFrame from load_metadata().
+        min_confidence: Minimum annotator confidence to include a label.
+            Use 0.0 (default) to include all annotated records, matching
+            the protocol of Strodthoff et al. (PTB-XL benchmark, 2021).
+
+    Returns:
+        float32 array of shape (n_records, 5) with binary indicators per class.
+        Rows with no active superclass (all zeros) are rare but possible.
+    """
+    labels = get_labels(records_df, scp_df, superclass=True, min_confidence=min_confidence)
+    result = np.zeros((len(records_df), len(SUPERCLASSES)), dtype=np.float32)
+    for i, lbls in enumerate(labels):
+        for j, sc in enumerate(SUPERCLASSES):
+            if sc in lbls:
+                result[i, j] = 1.0
+    return result
 
 
 def get_binary_label(

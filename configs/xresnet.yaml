@@ -1,0 +1,43 @@
+# xresnet.yaml — XResNet1D-101 multi-label training on PTB-XL
+#
+# Replicates the PTB-XL benchmark protocol (Strodthoff et al., IEEE JBHI 2021):
+#   - All 21,799 records (no binary filtering)
+#   - Official folds: train=1-8, val=9, test=10 (patient-independent)
+#   - 5 superclasses: NORM, MI, STTC, CD, HYP
+#   - Metric: macro-averaged AUC across the 5 classes
+#
+# Target: macro AUC ~0.930 (xresnet1d50) / ~0.937 (xresnet1d101)
+
+experiment:
+  name: xresnet1d101_multilabel
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel          # returns (n, 5) float32 labels
+  sampling_rate: 500        # Hz — 10 s × 500 Hz = 5000 samples
+  leads: 12
+  min_confidence: 0.0       # include all records (Strodthoff protocol)
+
+model:
+  architecture: xresnet1d101
+  num_classes: 5
+  kernel_size: 5            # middle conv in bottleneck
+  dropout: 0.5
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 100
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  early_stopping_patience: 15
+  use_amp: true             # fp16 — requires CUDA
+  gradient_clip_val: 1.0
+  scheduler_name: cosine
+  warmup_epochs: 5
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

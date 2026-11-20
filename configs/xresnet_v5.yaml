@@ -1,0 +1,64 @@
+# xresnet_v5.yaml — XResNet1D-50 multilabel + pos_weight + ReduceLROnPlateau
+#
+# =============================================================================
+# HISTORIAL DE VERSIONES
+# =============================================================================
+#
+# v1-v4: todas convergen al mismo pico ~0.911 en ep7, luego overfitting.
+#   Intentos fallidos: reducir capacidad (v3), pos_weight (v4).
+#   Pattern comun: train_loss baja monotonamente, val_auc se estanca/cae.
+#
+# v4 conclusion: el scheduler cosine baja el LR ciegamente, impulsando al
+#   modelo a memorizar train aunque val no mejore. El LR sigue cayendo
+#   incluso cuando val_auc lleva 20 epochs sin progresar.
+#
+# v5 (ReduceLROnPlateau sobre val_loss)
+#   Cambio principal: cosine -> plateau
+#     - LR solo se reduce cuando val_loss deja de mejorar (patience=5)
+#     - Factor 0.3: reduccion mas agresiva (1e-4 -> 3e-5 -> 9e-6)
+#     - Permite que el modelo explore mas tiempo con LR alto, y solo frene
+#       cuando la senal de validacion lo indique
+#   Mantiene de v4:
+#     - xresnet1d50, lr=1e-4, wd=1e-3, augment=true, pos_weight=true
+#     - early_stopping_patience: 25
+#   Hipotesis: el plateau scheduler actuara como regularizacion adaptativa,
+#     evitando que el modelo continue memorizando cuando val se estanca.
+#   Target: AUC >0.920, pico mas tarde (ep15-25) y mas estable
+# =============================================================================
+
+experiment:
+  name: xresnet1d50_v5
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+
+model:
+  architecture: xresnet1d50
+  num_classes: 5
+  kernel_size: 5
+  dropout: 0.5
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 100
+  batch_size: 32
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-3
+  early_stopping_patience: 25
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: plateau
+  lr_scheduler_patience: 5       # reduce LR si val_loss no mejora en 5 epochs
+  lr_scheduler_factor: 0.3       # 1e-4 -> 3e-5 -> 9e-6 (reduccion agresiva)
+  augment: true
+  use_pos_weight: true
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

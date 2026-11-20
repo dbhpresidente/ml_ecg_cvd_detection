@@ -1,0 +1,72 @@
+# xresnet_v4.yaml — XResNet1D-50 multilabel + pos_weight
+#
+# =============================================================================
+# HISTORIAL DE VERSIONES
+# =============================================================================
+#
+# v1 (xresnet1d101, lr=1e-3, wd=1e-4, sin augment)
+#   Best val AUC: 0.9133 @ ep19
+#   Problema: overfitting agresivo a partir de ep20.
+#
+# v2 (xresnet1d101, lr=1e-4, wd=1e-3, augment=true)
+#   Best val AUC: 0.9138 @ ep14
+#   Problema: mismo patrón de overfitting, solo desplazado 5 epochs.
+#   Conclusion: modelo demasiada capacidad (8.3M / 17K = 490 params/muestra)
+#
+# v3 (xresnet1d50, lr=1e-4, wd=1e-3, augment=true)
+#   Best val AUC: 0.9114 @ ep7, early stop ep32
+#   Problema: mismo patrón. Loss train 0.41 -> 0.09, val AUC oscila y cae.
+#   Conclusión: reducir capacidad no fue suficiente. El cuello de botella es
+#               la loss sin calibrar: HYP tiene 2,649 positivos vs 9,514 NORM.
+#               BCE plana penaliza igual todos los errores -> el modelo ignora
+#               clases minoritarias (HYP max 0.838 vs NORM/STTC/CD > 0.92).
+#
+# v4 (xresnet1d50 + pos_weight por clase)
+#   Cambio principal: use_pos_weight=true
+#     Pesos calculados del train set (n_neg/n_pos):
+#       NORM  ~0.80  (clase mayoritaria, slight downweight)
+#       MI    ~2.12
+#       STTC  ~2.26
+#       CD    ~2.49
+#       HYP   ~5.45  (clase más desbalanceada)
+#   Mantiene todo lo demás de v3:
+#     - xresnet1d50 [3,4,6,3] — 4.6M params
+#     - lr=1e-4, wd=1e-3, augment=true, patience=25
+#   Target: AUC >0.920, con HYP >0.870
+# =============================================================================
+
+experiment:
+  name: xresnet1d50_v4
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+
+model:
+  architecture: xresnet1d50
+  num_classes: 5
+  kernel_size: 5
+  dropout: 0.5
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 100
+  batch_size: 32
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-3
+  early_stopping_patience: 25
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: cosine
+  warmup_epochs: 3
+  augment: true
+  use_pos_weight: true            # pos_weight = n_neg/n_pos por clase (HYP ~5.45)
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

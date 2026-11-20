@@ -1,30 +1,40 @@
-"""PyTorch training loop for CNN1D ECG classification.
+"""PyTorch training loop for ECG classification (binary and multi-label).
 
 Requires PyTorch.  Install with:  pip install torch
 
 Features:
+    - Binary mode   : CrossEntropyLoss, AUC-based early stopping.
+    - Multilabel mode: BCEWithLogitsLoss, macro-AUC early stopping.
     - AdamW optimiser with configurable LR and weight decay.
-    - Class-balanced CrossEntropyLoss (handles CVD/NORM imbalance).
-    - ReduceLROnPlateau scheduler on validation loss.
-    - Early stopping on validation ROC-AUC.
+    - Cosine annealing scheduler with optional linear warmup.
+    - ReduceLROnPlateau (legacy / binary mode default).
+    - AMP (fp16) with GradScaler for GPU training.
+    - Gradient clipping (max_norm).
     - Best-checkpoint saving / loading.
     - Auto device selection (CUDA → MPS → CPU).
 
-Usage:
-    >>> from src.models.cnn1d import CNN1D
+Usage (multilabel / xresnet1d):
+    >>> from src.models.xresnet1d import xresnet1d101
     >>> from src.training.trainer import Trainer, TrainerConfig
-    >>> model = CNN1D()
-    >>> cfg = TrainerConfig(epochs=50, batch_size=32, checkpoint_dir=Path("checkpoints"))
+    >>> model = xresnet1d101()
+    >>> cfg = TrainerConfig(
+    ...     mode="multilabel", num_classes=5,
+    ...     scheduler_name="cosine", warmup_epochs=5,
+    ...     use_amp=True, gradient_clip_val=1.0,
+    ...     epochs=100, batch_size=32,
+    ...     checkpoint_dir=Path("checkpoints"),
+    ... )
     >>> trainer = Trainer(model, cfg)
     >>> history = trainer.fit(X_train, y_train, X_val, y_val)
-    >>> test_metrics = trainer.evaluate(X_test, y_test)
 """
 import dataclasses
 import logging
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+from sklearn.metrics import roc_auc_score
 
 try:
     import torch
@@ -39,6 +49,9 @@ from src.models.metrics import compute_metrics
 
 logger = logging.getLogger(__name__)
 
+# Superclass names (must match SUPERCLASSES order in loader.py)
+_SUPERCLASSES = ["NORM", "MI", "STTC", "CD", "HYP"]
+
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -46,44 +59,50 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class TrainerConfig:
-    """Hyperparameters and paths for the CNN training loop.
+    """Hyperparameters and settings for the training loop.
 
     Attributes:
-        epochs: Maximum number of training epochs.
-        batch_size: Mini-batch size for DataLoader.
+        mode: ``"binary"`` (CrossEntropyLoss, int64 labels) or
+              ``"multilabel"`` (BCEWithLogitsLoss, float32 labels shape (n,C)).
+        num_classes: Number of output classes (required for multilabel metrics).
+        epochs: Maximum training epochs.
+        batch_size: Mini-batch size.
         learning_rate: Initial learning rate for AdamW.
-        weight_decay: L2 regularisation coefficient for AdamW.
-        early_stopping_patience: Stop training if val AUC does not improve
-            for this many consecutive epochs.
-        lr_scheduler_patience: Reduce LR if val loss does not improve for
-            this many epochs (ReduceLROnPlateau).
-        lr_scheduler_factor: Factor by which LR is reduced on plateau.
+        weight_decay: L2 regularisation for AdamW.
+        early_stopping_patience: Stop if val AUC does not improve this many epochs.
+        use_amp: Enable automatic mixed precision (fp16). Requires CUDA.
+        gradient_clip_val: Max gradient norm (0 = disabled).
+        scheduler_name: ``"cosine"`` (cosine annealing + warmup) or
+                        ``"plateau"`` (ReduceLROnPlateau on val loss).
+        warmup_epochs: Linear LR warmup epochs (cosine scheduler only).
+        lr_scheduler_patience: ReduceLROnPlateau patience (plateau scheduler only).
+        lr_scheduler_factor: ReduceLROnPlateau factor (plateau scheduler only).
+        augment: Enable signal augmentation on the training set (amplitude
+            scaling, Gaussian noise, lead dropout). Applied only during training.
         checkpoint_dir: Directory for saving checkpoints.
-        device: Compute device.  ``'auto'`` selects CUDA → MPS → CPU.
+        device: ``"auto"`` selects CUDA → MPS → CPU.
     """
-
+    mode: str = "binary"
+    num_classes: int = 2
     epochs: int = 50
     batch_size: int = 32
     learning_rate: float = 1e-3
     weight_decay: float = 1e-4
     early_stopping_patience: int = 10
+    use_amp: bool = False
+    gradient_clip_val: float = 0.0
+    scheduler_name: str = "plateau"
+    warmup_epochs: int = 0
     lr_scheduler_patience: int = 3
     lr_scheduler_factor: float = 0.5
+    augment: bool = False
+    use_pos_weight: bool = False
     checkpoint_dir: Path = field(default_factory=lambda: Path("checkpoints"))
     device: str = "auto"
 
     @classmethod
     def from_dict(cls, d: dict) -> "TrainerConfig":
-        """Build a TrainerConfig from a plain dict (e.g., parsed from YAML).
-
-        Unknown keys are silently ignored so the full config dict can be passed.
-
-        Args:
-            d: Dictionary with optional keys matching TrainerConfig fields.
-
-        Returns:
-            TrainerConfig instance.
-        """
+        """Build from a plain dict (unknown keys are silently ignored)."""
         known = {f.name for f in dataclasses.fields(cls)}
         filtered = {k: v for k, v in d.items() if k in known}
         if "checkpoint_dir" in filtered:
@@ -92,21 +111,65 @@ class TrainerConfig:
 
 
 # ---------------------------------------------------------------------------
-# Internal PyTorch Dataset wrapper
+# Internal PyTorch Dataset
 # ---------------------------------------------------------------------------
 
 class _ECGDataset(Dataset):
-    """Thin PyTorch Dataset wrapping numpy signal and label arrays."""
+    """Thin PyTorch Dataset wrapping numpy signal and label arrays.
 
-    def __init__(self, signals: np.ndarray, labels: np.ndarray) -> None:
+    Supports both int64 (binary) and float32 (multilabel) label arrays.
+    When ``augment=True``, applies on-the-fly signal augmentation during training:
+        - Amplitude scaling  : multiply each lead by U(0.75, 1.25)
+        - Gaussian noise     : add N(0, 0.05) noise per sample
+        - Lead dropout       : zero out 1–2 random leads with p=0.3
+    """
+
+    def __init__(
+        self,
+        signals: np.ndarray,
+        labels: np.ndarray,
+        augment: bool = False,
+    ) -> None:
         self.signals = torch.from_numpy(np.asarray(signals, dtype=np.float32))
-        self.labels = torch.from_numpy(np.asarray(labels, dtype=np.int64))
+        if labels.dtype == np.float32 or labels.ndim == 2:
+            self.labels = torch.from_numpy(np.asarray(labels, dtype=np.float32))
+        else:
+            self.labels = torch.from_numpy(np.asarray(labels, dtype=np.int64))
+        self.augment = augment
 
     def __len__(self) -> int:
         return len(self.labels)
 
     def __getitem__(self, idx: int) -> tuple["torch.Tensor", "torch.Tensor"]:
-        return self.signals[idx], self.labels[idx]
+        signal = self.signals[idx].clone()
+        if self.augment:
+            signal = _augment_signal(signal)
+        return signal, self.labels[idx]
+
+
+def _augment_signal(x: "torch.Tensor") -> "torch.Tensor":
+    """Apply random augmentations to a single ECG signal (leads, samples).
+
+    Args:
+        x: Float32 tensor of shape (n_leads, samples).
+
+    Returns:
+        Augmented tensor of the same shape.
+    """
+    # Amplitude scaling: each lead independently scaled by U(0.75, 1.25)
+    scale = torch.empty(x.shape[0], 1).uniform_(0.75, 1.25)
+    x = x * scale
+
+    # Gaussian noise: σ = 0.05 relative to per-lead std
+    std = x.std(dim=-1, keepdim=True).clamp(min=1e-6)
+    x = x + torch.randn_like(x) * (0.05 * std)
+
+    # Lead dropout: zero out 1 random lead with probability 0.3
+    if torch.rand(1).item() < 0.3:
+        lead_idx = torch.randint(0, x.shape[0], (1,)).item()
+        x[lead_idx] = 0.0
+
+    return x
 
 
 # ---------------------------------------------------------------------------
@@ -114,25 +177,25 @@ class _ECGDataset(Dataset):
 # ---------------------------------------------------------------------------
 
 class Trainer:
-    """Training loop for CNN1D on ECG data.
+    """Training loop for ECG classification models.
 
     Args:
-        model: Instantiated CNN1D (or any nn.Module with the same interface).
+        model: Any nn.Module with signature forward(x) → logits.
         config: TrainerConfig.  Uses defaults if not provided.
-
-    Example:
-        >>> model = CNN1D(n_leads=12, n_classes=2)
-        >>> trainer = Trainer(model, TrainerConfig(epochs=30))
-        >>> history = trainer.fit(X_train, y_train, X_val, y_val)
-        >>> metrics = trainer.evaluate(X_test, y_test)
     """
 
-    def __init__(self, model: nn.Module, config: TrainerConfig | None = None) -> None:
+    def __init__(self, model: nn.Module, config: "TrainerConfig | None" = None) -> None:
         self.config = config or TrainerConfig()
         self.device = self._resolve_device(self.config.device)
         self.model = model.to(self.device)
-        logger.info("Trainer — device: %s  params: %s",
-                    self.device, _fmt_params(model))
+        self._scaler: "torch.cuda.amp.GradScaler | None" = None
+        if self.config.use_amp and self.device.type == "cuda":
+            self._scaler = torch.amp.GradScaler("cuda")
+            logger.info("AMP (fp16) enabled")
+        logger.info(
+            "Trainer — mode: %s  device: %s  params: %s",
+            self.config.mode, self.device, _fmt_params(model),
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -144,72 +207,88 @@ class Trainer:
         y_train: np.ndarray,
         X_val: np.ndarray,
         y_val: np.ndarray,
-    ) -> list[dict[str, float]]:
+    ) -> list[dict]:
         """Train with early stopping and save the best checkpoint.
 
         Args:
-            X_train: Training signals, shape (n, leads, samples).
-            y_train: Training binary labels, shape (n,).
-            X_val: Validation signals, shape (n, leads, samples).
-            y_val: Validation binary labels, shape (n,).
+            X_train: Signals, shape (n, leads, samples).
+            y_train: Binary → (n,) int64.  Multilabel → (n, C) float32.
+            X_val:   Validation signals.
+            y_val:   Validation labels.
 
         Returns:
-            History: list of one dict per epoch with keys
-            ``epoch``, ``train_loss``, ``val_loss``, and all val metrics
-            prefixed with ``val_`` (e.g. ``val_roc_auc``, ``val_f1``).
+            History: list of dicts with epoch metrics.
         """
         cfg = self.config
         cfg.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         train_loader = DataLoader(
-            _ECGDataset(X_train, y_train),
+            _ECGDataset(X_train, y_train, augment=cfg.augment),
             batch_size=cfg.batch_size,
             shuffle=True,
             drop_last=False,
+            pin_memory=(self.device.type == "cuda"),
+            num_workers=0,
         )
         val_loader = DataLoader(
             _ECGDataset(X_val, y_val),
             batch_size=cfg.batch_size,
             shuffle=False,
+            pin_memory=(self.device.type == "cuda"),
+            num_workers=0,
         )
 
         criterion = self._build_criterion(y_train)
         optimizer = self._build_optimizer()
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
-            mode="min",
-            patience=cfg.lr_scheduler_patience,
-            factor=cfg.lr_scheduler_factor,
-        )
+        scheduler = self._build_scheduler(optimizer)
 
         best_val_auc: float = -1.0
         patience_counter: int = 0
-        history: list[dict[str, float]] = []
+        history: list[dict] = []
 
         for epoch in range(1, cfg.epochs + 1):
             train_loss = self._train_epoch(train_loader, criterion, optimizer)
-            val_loss, y_true, y_pred, y_prob = self._eval_epoch(val_loader, criterion)
+            val_loss, y_true, y_prob = self._eval_epoch(val_loader, criterion)
 
-            val_metrics = compute_metrics(y_true, y_pred, y_prob)
-            val_auc = val_metrics.get("roc_auc", 0.0)
+            if cfg.mode == "multilabel":
+                val_metrics = _compute_multilabel_metrics(y_true, y_prob)
+            else:
+                y_pred = (y_prob >= 0.5).astype(int)
+                val_metrics = compute_metrics(y_true, y_pred, y_prob)
 
-            scheduler.step(val_loss)
+            val_auc = val_metrics.get("macro_auc", val_metrics.get("roc_auc", 0.0))
 
-            epoch_record: dict[str, float] = {
-                "epoch": float(epoch),
+            # Scheduler step
+            if cfg.scheduler_name == "plateau":
+                scheduler.step(val_loss)
+            else:
+                scheduler.step()
+
+            current_lr = optimizer.param_groups[0]["lr"]
+            epoch_record: dict = {
+                "epoch": epoch,
                 "train_loss": train_loss,
                 "val_loss": val_loss,
+                "lr": current_lr,
                 **{f"val_{k}": v for k, v in val_metrics.items()},
             }
             history.append(epoch_record)
 
-            logger.info(
-                "Epoch %3d/%d  train=%.4f  val=%.4f  auc=%.4f  f1=%.4f  "
-                "sens=%.4f  spec=%.4f",
-                epoch, cfg.epochs,
-                train_loss, val_loss, val_auc, val_metrics["f1"],
-                val_metrics["sensitivity"], val_metrics["specificity"],
-            )
+            if cfg.mode == "multilabel":
+                per_class = val_metrics.get("per_class_auc", {})
+                class_str = "  ".join(
+                    f"{c}:{per_class.get(c, 0):.3f}" for c in _SUPERCLASSES
+                )
+                logger.info(
+                    "Epoch %3d/%d  loss=%.4f  macro_auc=%.4f  lr=%.2e | %s",
+                    epoch, cfg.epochs, train_loss, val_auc, current_lr, class_str,
+                )
+            else:
+                logger.info(
+                    "Epoch %3d/%d  train=%.4f  val=%.4f  auc=%.4f  f1=%.4f  lr=%.2e",
+                    epoch, cfg.epochs, train_loss, val_loss,
+                    val_auc, val_metrics.get("f1", float("nan")), current_lr,
+                )
 
             if val_auc > best_val_auc:
                 best_val_auc = val_auc
@@ -229,64 +308,45 @@ class Trainer:
 
         return history
 
-    def evaluate(self, X: np.ndarray, y: np.ndarray) -> dict[str, float]:
+    def evaluate(self, X: np.ndarray, y: np.ndarray) -> dict:
         """Evaluate the model on a held-out split.
 
         Args:
             X: Signals, shape (n, leads, samples).
-            y: Binary labels, shape (n,).
+            y: Labels matching the configured mode.
 
         Returns:
-            Metrics dict from compute_metrics() (accuracy, AUC, F1, …).
+            Metrics dict.
         """
         loader = DataLoader(
             _ECGDataset(X, y),
             batch_size=self.config.batch_size,
             shuffle=False,
+            num_workers=0,
         )
-        criterion = nn.CrossEntropyLoss()
-        _, y_true, y_pred, y_prob = self._eval_epoch(loader, criterion)
+        criterion = self._build_criterion(y)
+        _, y_true, y_prob = self._eval_epoch(loader, criterion)
+
+        if self.config.mode == "multilabel":
+            return _compute_multilabel_metrics(y_true, y_prob)
+        y_pred = (y_prob >= 0.5).astype(int)
         return compute_metrics(y_true, y_pred, y_prob)
 
-    def save_checkpoint(
-        self,
-        path: Path,
-        epoch: int,
-        metrics: dict[str, float],
-    ) -> None:
-        """Save model weights and metadata to a .pt file.
-
-        Args:
-            path: Destination file path.
-            epoch: Current epoch (stored as metadata).
-            metrics: Validation metrics at this point (stored as metadata).
-        """
+    def save_checkpoint(self, path: Path, epoch: int, metrics: dict) -> None:
         torch.save(
-            {
-                "epoch": epoch,
-                "model_state_dict": self.model.state_dict(),
-                "metrics": metrics,
-            },
+            {"epoch": epoch, "model_state_dict": self.model.state_dict(), "metrics": metrics},
             path,
         )
 
-    def load_checkpoint(self, path: Path) -> dict[str, object]:
-        """Load model weights from a checkpoint file.
-
-        Args:
-            path: Path to a .pt checkpoint produced by save_checkpoint().
-
-        Returns:
-            Metadata dict with keys ``epoch`` and ``metrics``
-            (model weights are loaded in-place into self.model).
-        """
+    def load_checkpoint(self, path: Path) -> dict:
         checkpoint = torch.load(path, map_location=self.device, weights_only=True)
         self.model.load_state_dict(checkpoint["model_state_dict"])
+        auc = checkpoint["metrics"].get(
+            "macro_auc", checkpoint["metrics"].get("roc_auc", float("nan"))
+        )
         logger.info(
             "Loaded checkpoint '%s'  epoch=%d  val_auc=%.4f",
-            path,
-            checkpoint["epoch"],
-            checkpoint["metrics"].get("roc_auc", float("nan")),
+            path, checkpoint["epoch"], auc,
         )
         return {"epoch": checkpoint["epoch"], "metrics": checkpoint["metrics"]}
 
@@ -311,36 +371,73 @@ class Trainer:
             weight_decay=self.config.weight_decay,
         )
 
-    def _build_criterion(self, y_train: np.ndarray) -> "nn.CrossEntropyLoss":
-        """CrossEntropyLoss with inverse-frequency class weights."""
+    def _build_criterion(self, y_train: np.ndarray) -> nn.Module:
+        if self.config.mode == "multilabel":
+            if self.config.use_pos_weight:
+                n_pos = y_train.sum(axis=0).clip(min=1)
+                n_neg = len(y_train) - n_pos
+                pos_weight = torch.tensor(n_neg / n_pos, dtype=torch.float32, device=self.device)
+                logger.info(
+                    "pos_weight per class: %s",
+                    {c: f"{w:.3f}" for c, w in zip(_SUPERCLASSES, pos_weight.tolist())},
+                )
+                return nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            return nn.BCEWithLogitsLoss()
+        # Binary: inverse-frequency class weights
         n_neg = max(int((y_train == 0).sum()), 1)
         n_pos = max(int((y_train == 1).sum()), 1)
         total = n_neg + n_pos
         weight = torch.tensor(
             [total / (2.0 * n_neg), total / (2.0 * n_pos)],
-            device=self.device,
-            dtype=torch.float32,
+            device=self.device, dtype=torch.float32,
         )
         return nn.CrossEntropyLoss(weight=weight)
+
+    def _build_scheduler(
+        self, optimizer: "torch.optim.Optimizer"
+    ) -> "torch.optim.lr_scheduler.LRScheduler":
+        cfg = self.config
+        if cfg.scheduler_name == "cosine":
+            return _cosine_schedule_with_warmup(optimizer, cfg.warmup_epochs, cfg.epochs)
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            patience=cfg.lr_scheduler_patience,
+            factor=cfg.lr_scheduler_factor,
+        )
 
     def _train_epoch(
         self,
         loader: "DataLoader",
-        criterion: "nn.CrossEntropyLoss",
+        criterion: nn.Module,
         optimizer: "torch.optim.Optimizer",
     ) -> float:
-        """Run one training epoch. Returns average loss."""
         self.model.train()
         total_loss = 0.0
+        cfg = self.config
+        amp_enabled = self._scaler is not None
 
         for signals, labels in loader:
-            signals = signals.to(self.device)
-            labels = labels.to(self.device)
+            signals = signals.to(self.device, non_blocking=True)
+            labels  = labels.to(self.device, non_blocking=True)
 
             optimizer.zero_grad()
-            loss = criterion(self.model(signals), labels)
-            loss.backward()
-            optimizer.step()
+
+            if amp_enabled:
+                with torch.autocast(device_type="cuda", dtype=torch.float16):
+                    loss = criterion(self.model(signals), labels)
+                self._scaler.scale(loss).backward()
+                if cfg.gradient_clip_val > 0:
+                    self._scaler.unscale_(optimizer)
+                    nn.utils.clip_grad_norm_(self.model.parameters(), cfg.gradient_clip_val)
+                self._scaler.step(optimizer)
+                self._scaler.update()
+            else:
+                loss = criterion(self.model(signals), labels)
+                loss.backward()
+                if cfg.gradient_clip_val > 0:
+                    nn.utils.clip_grad_norm_(self.model.parameters(), cfg.gradient_clip_val)
+                optimizer.step()
 
             total_loss += loss.item() * len(labels)
 
@@ -349,36 +446,107 @@ class Trainer:
     def _eval_epoch(
         self,
         loader: "DataLoader",
-        criterion: "nn.CrossEntropyLoss",
-    ) -> tuple[float, np.ndarray, np.ndarray, np.ndarray]:
-        """Run one evaluation epoch. Returns (avg_loss, y_true, y_pred, y_prob)."""
+        criterion: nn.Module,
+    ) -> "tuple[float, np.ndarray, np.ndarray]":
+        """Returns (avg_loss, y_true, y_prob).
+
+        y_prob shape: (n,) for binary, (n, C) for multilabel.
+        """
         self.model.eval()
         total_loss = 0.0
-        all_labels, all_preds, all_probs = [], [], []
+        all_labels, all_probs = [], []
 
         with torch.no_grad():
             for signals, labels in loader:
-                signals = signals.to(self.device)
-                labels = labels.to(self.device)
+                signals = signals.to(self.device, non_blocking=True)
+                labels  = labels.to(self.device, non_blocking=True)
 
                 logits = self.model(signals)
                 total_loss += criterion(logits, labels).item() * len(labels)
 
-                probs = torch.softmax(logits, dim=1)[:, 1].cpu().numpy()
-                preds = logits.argmax(dim=1).cpu().numpy()
+                if self.config.mode == "multilabel":
+                    probs = torch.sigmoid(logits).cpu().numpy()
+                else:
+                    probs = torch.softmax(logits, dim=1)[:, 1].cpu().numpy()
 
                 all_labels.append(labels.cpu().numpy())
-                all_preds.append(preds)
                 all_probs.append(probs)
 
-        avg_loss = total_loss / len(loader.dataset)
         return (
-            avg_loss,
+            total_loss / len(loader.dataset),
             np.concatenate(all_labels),
-            np.concatenate(all_preds),
             np.concatenate(all_probs),
         )
 
+
+# ---------------------------------------------------------------------------
+# Multilabel metrics helper
+# ---------------------------------------------------------------------------
+
+def _compute_multilabel_metrics(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+) -> dict:
+    """Compute macro-AUC and per-class AUC for 5-class multilabel output.
+
+    Args:
+        y_true: Ground-truth array, shape (n, 5), float32.
+        y_prob: Sigmoid probabilities, shape (n, 5), float32.
+
+    Returns:
+        Dict with ``macro_auc`` and ``per_class_auc`` (dict keyed by class name).
+    """
+    n_classes = y_true.shape[1]
+    class_names = _SUPERCLASSES[:n_classes]
+    per_class: dict[str, float] = {}
+
+    aucs = []
+    for i, name in enumerate(class_names):
+        col_true = y_true[:, i]
+        # Skip classes with only one label value present
+        if len(np.unique(col_true)) < 2:
+            logger.warning("Class %s has only one unique label — skipping AUC", name)
+            continue
+        auc = float(roc_auc_score(col_true, y_prob[:, i]))
+        per_class[name] = auc
+        aucs.append(auc)
+
+    macro_auc = float(np.mean(aucs)) if aucs else 0.0
+    return {"macro_auc": macro_auc, "per_class_auc": per_class}
+
+
+# ---------------------------------------------------------------------------
+# Cosine scheduler with linear warmup
+# ---------------------------------------------------------------------------
+
+def _cosine_schedule_with_warmup(
+    optimizer: "torch.optim.Optimizer",
+    warmup_epochs: int,
+    total_epochs: int,
+    min_lr_factor: float = 0.01,
+) -> "torch.optim.lr_scheduler.LambdaLR":
+    """LambdaLR with linear warmup followed by cosine annealing.
+
+    Args:
+        optimizer:      Wrapped optimizer.
+        warmup_epochs:  Number of linear warmup epochs.
+        total_epochs:   Total training epochs.
+        min_lr_factor:  LR floor as a fraction of base LR (default 1%).
+    """
+    def lr_lambda(epoch: int) -> float:
+        if warmup_epochs > 0 and epoch < warmup_epochs:
+            return float(epoch + 1) / float(warmup_epochs)
+        progress = float(epoch - warmup_epochs) / float(
+            max(1, total_epochs - warmup_epochs)
+        )
+        return max(min_lr_factor, 0.5 * (1.0 + math.cos(math.pi * progress)))
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
 
 def _fmt_params(model: nn.Module) -> str:
     n = sum(p.numel() for p in model.parameters() if p.requires_grad)
