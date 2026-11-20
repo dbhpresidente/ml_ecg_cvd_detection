@@ -1,0 +1,77 @@
+# xresnet_v6.yaml — XResNet1D-50 + OneCycleLR (benchmark recipe)
+#
+# =============================================================================
+# HISTORIAL DE VERSIONES Y DIAGNOSIS
+# =============================================================================
+#
+# v1-v5: AUC plateau en 0.911-0.914. Hipotesis fallidas:
+#   - v3: reducir capacidad (8.3M -> 4.6M params)
+#   - v4: pos_weight por clase
+#   - v5: ReduceLROnPlateau (factor=0.3 demasiado agresivo, lr -> 2e-7)
+#
+# INVESTIGACION DE SOTA (2026-11-20):
+#   Agente de diagnosis confirmo que nuestros hiperparametros difieren
+#   sistematicamente del benchmark oficial Strodthoff et al. (2021):
+#
+#   Parametro    | Nuestro v1-v5  | Benchmark oficial
+#   -------------|----------------|-------------------
+#   LR           | 1e-4           | 1e-3  (10x mayor)
+#   Scheduler    | cosine/plateau | OneCycleLR (per-batch)
+#   Weight decay | 1e-3           | 1e-4  (10x menor)
+#   pos_weight   | si (v4+)       | NO  (BCE plana)
+#   Epochs       | 100            | 25-50
+#
+#   OneCycleLR es el default de fastai (en que se basa el benchmark):
+#     - Fase 1 (pct_start=30%): LR sube de lr/25 -> lr_max=1e-3
+#     - Fase 2 (70%): LR baja de lr_max -> lr/1e4 (cosine)
+#     - Efecto: exploracion agresiva al inicio, convergencia controlada al final
+#     - Diferencia clave vs cosine: NO baja LR ciegamente, primero sube
+#
+# v6 — xresnet1d50 + recipe oficial
+#   Cambios vs v5:
+#     - lr: 1e-4 -> 1e-3 (max_lr para OneCycleLR)
+#     - scheduler: plateau -> onecycle (stepped per batch)
+#     - weight_decay: 1e-3 -> 1e-4
+#     - use_pos_weight: true -> false (BCE sin pesos)
+#     - epochs: 100 -> 50 (OneCycleLR converge mas rapido)
+#     - early_stopping_patience: 25 -> 15
+#   Mantiene: xresnet1d50, augment=true, AMP, gradient_clip
+#   Target: AUC >= 0.930, cerrando el gap vs benchmark (0.936)
+# =============================================================================
+
+experiment:
+  name: xresnet1d50_v6
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+
+model:
+  architecture: xresnet1d50
+  num_classes: 5
+  kernel_size: 5
+  dropout: 0.5
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 50
+  batch_size: 32
+  learning_rate: 1.0e-3            # max_lr para OneCycleLR (10x mayor que v1-v5)
+  weight_decay: 1.0e-4             # 10x menor que v2-v5 (benchmark usa 1e-4)
+  early_stopping_patience: 15
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: onecycle         # OneCycleLR stepped per batch (fastai default)
+  lr_onecycle_pct_start: 0.3       # 30% warmup: lr sube lr/25 -> 1e-3
+  lr_onecycle_div_factor: 25.0     # lr_inicial = 1e-3 / 25 = 4e-5
+  augment: true
+  use_pos_weight: false            # BCE sin pesos (igual que benchmark oficial)
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

@@ -72,11 +72,14 @@ class TrainerConfig:
         early_stopping_patience: Stop if val AUC does not improve this many epochs.
         use_amp: Enable automatic mixed precision (fp16). Requires CUDA.
         gradient_clip_val: Max gradient norm (0 = disabled).
-        scheduler_name: ``"cosine"`` (cosine annealing + warmup) or
-                        ``"plateau"`` (ReduceLROnPlateau on val loss).
+        scheduler_name: ``"cosine"`` (cosine annealing + warmup),
+                        ``"plateau"`` (ReduceLROnPlateau on val loss), or
+                        ``"onecycle"`` (OneCycleLR — stepped per batch, fastai default).
         warmup_epochs: Linear LR warmup epochs (cosine scheduler only).
         lr_scheduler_patience: ReduceLROnPlateau patience (plateau scheduler only).
         lr_scheduler_factor: ReduceLROnPlateau factor (plateau scheduler only).
+        lr_onecycle_pct_start: Fraction of training for LR ramp-up (onecycle only).
+        lr_onecycle_div_factor: initial_lr = max_lr / div_factor (onecycle only).
         augment: Enable signal augmentation on the training set (amplitude
             scaling, Gaussian noise, lead dropout). Applied only during training.
         checkpoint_dir: Directory for saving checkpoints.
@@ -95,6 +98,8 @@ class TrainerConfig:
     warmup_epochs: int = 0
     lr_scheduler_patience: int = 3
     lr_scheduler_factor: float = 0.5
+    lr_onecycle_pct_start: float = 0.3
+    lr_onecycle_div_factor: float = 25.0
     augment: bool = False
     use_pos_weight: bool = False
     checkpoint_dir: Path = field(default_factory=lambda: Path("checkpoints"))
@@ -240,14 +245,34 @@ class Trainer:
 
         criterion = self._build_criterion(y_train)
         optimizer = self._build_optimizer()
-        scheduler = self._build_scheduler(optimizer)
+
+        # OneCycleLR must be built after DataLoader (needs steps_per_epoch)
+        if cfg.scheduler_name == "onecycle":
+            total_steps = cfg.epochs * len(train_loader)
+            scheduler = torch.optim.lr_scheduler.OneCycleLR(
+                optimizer,
+                max_lr=cfg.learning_rate,
+                total_steps=total_steps,
+                pct_start=cfg.lr_onecycle_pct_start,
+                div_factor=cfg.lr_onecycle_div_factor,
+                final_div_factor=1e4,
+                anneal_strategy="cos",
+            )
+            batch_scheduler = scheduler
+            logger.info(
+                "OneCycleLR: max_lr=%.2e  total_steps=%d  pct_start=%.2f",
+                cfg.learning_rate, total_steps, cfg.lr_onecycle_pct_start,
+            )
+        else:
+            scheduler = self._build_scheduler(optimizer)
+            batch_scheduler = None
 
         best_val_auc: float = -1.0
         patience_counter: int = 0
         history: list[dict] = []
 
         for epoch in range(1, cfg.epochs + 1):
-            train_loss = self._train_epoch(train_loader, criterion, optimizer)
+            train_loss = self._train_epoch(train_loader, criterion, optimizer, batch_scheduler)
             val_loss, y_true, y_prob = self._eval_epoch(val_loader, criterion)
 
             if cfg.mode == "multilabel":
@@ -258,10 +283,10 @@ class Trainer:
 
             val_auc = val_metrics.get("macro_auc", val_metrics.get("roc_auc", 0.0))
 
-            # Scheduler step
+            # Scheduler step (plateau/cosine only — onecycle steps per batch)
             if cfg.scheduler_name == "plateau":
                 scheduler.step(val_loss)
-            else:
+            elif cfg.scheduler_name != "onecycle":
                 scheduler.step()
 
             current_lr = optimizer.param_groups[0]["lr"]
@@ -411,6 +436,7 @@ class Trainer:
         loader: "DataLoader",
         criterion: nn.Module,
         optimizer: "torch.optim.Optimizer",
+        batch_scheduler: "torch.optim.lr_scheduler.LRScheduler | None" = None,
     ) -> float:
         self.model.train()
         total_loss = 0.0
@@ -438,6 +464,9 @@ class Trainer:
                 if cfg.gradient_clip_val > 0:
                     nn.utils.clip_grad_norm_(self.model.parameters(), cfg.gradient_clip_val)
                 optimizer.step()
+
+            if batch_scheduler is not None:
+                batch_scheduler.step()
 
             total_loss += loss.item() * len(labels)
 
