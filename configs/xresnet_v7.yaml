@@ -1,0 +1,59 @@
+# xresnet_v7.yaml — XResNet1D-101 + OneCycleLR (benchmark recipe)
+#
+# =============================================================================
+# HISTORIAL DE VERSIONES Y DIAGNOSIS
+# =============================================================================
+#
+# v6:   xresnet1d50  + OneCycleLR -> AUC 0.9174 (best ep18)
+# v6.1: xresnet1d50  + patience=25 -> AUC 0.9170 — TECHO CONFIRMADO en 0.917
+#
+# CONCLUSION v6.1:
+#   xresnet1d50 (4.6M params) tiene techo ~0.917 con este dataset y recipe.
+#   El gap residual (0.917 vs benchmark 0.936) requiere mayor capacidad.
+#
+# v7 — xresnet1d101 + recipe v6 (mismo, solo cambia arquitectura)
+#   Cambios vs v6:
+#     - architecture: xresnet1d50 -> xresnet1d101 (4.6M -> 8.3M params)
+#   Mantiene todo lo demas identico:
+#     - OneCycleLR, lr=1e-3, wd=1e-4, BCE plana, augment, AMP
+#     - patience=15, epochs=50
+#   Target: AUC >= 0.928, cerrando el gap vs benchmark (0.936-0.937)
+#   Referencia: nuestro v1 (xresnet1d101, recipe distinto) llego a 0.9133
+# =============================================================================
+
+experiment:
+  name: xresnet1d101_v7
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+
+model:
+  architecture: xresnet1d101
+  num_classes: 5
+  kernel_size: 5
+  dropout: 0.5
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 50
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  early_stopping_patience: 15
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: onecycle
+  lr_onecycle_pct_start: 0.3
+  lr_onecycle_div_factor: 25.0
+  augment: true
+  use_pos_weight: false
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

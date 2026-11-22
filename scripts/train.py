@@ -230,6 +230,61 @@ def _train_xresnet(cfg: dict, dataset, run_dir: Path, checkpoint_dir: Path) -> N
         _save_json(val_metrics, run_dir / "metrics_val.json")
 
 
+def _train_s4d(cfg: dict, dataset, run_dir: Path, checkpoint_dir: Path) -> None:
+    """Train S4D (Diagonal State Space Model) in multilabel mode."""
+    try:
+        from src.models.s4d import S4DModel
+        from src.training.trainer import Trainer, TrainerConfig
+    except ImportError as exc:
+        raise SystemExit("PyTorch is required for S4D training: pip install torch") from exc
+
+    model_cfg = cfg["model"]
+    data_cfg = cfg["data"]
+
+    model = S4DModel(
+        n_leads=data_cfg.get("leads", 12),
+        n_classes=model_cfg["num_classes"],
+        d_model=model_cfg.get("d_model", 256),
+        d_state=model_cfg.get("d_state", 32),
+        n_layers=model_cfg.get("n_layers", 6),
+        dropout=model_cfg.get("dropout", 0.1),
+        gradient_checkpointing=model_cfg.get("gradient_checkpointing", True),
+    )
+    logger.info("S4D: %s parameters", f"{model.count_parameters():,}")
+
+    trainer_cfg = TrainerConfig.from_dict({
+        **cfg.get("training", {}),
+        "checkpoint_dir": checkpoint_dir,
+        "device": "auto",
+    })
+
+    logger.info("=== S4D training ===")
+    logger.info("Loading train split...")
+    X_train, y_train = dataset.get_split("train")
+    logger.info("Train: %d records  labels shape: %s", len(X_train), y_train.shape)
+    logger.info("Loading val split...")
+    X_val, y_val = dataset.get_split("val")
+
+    trainer = Trainer(model, trainer_cfg)
+    history = trainer.fit(X_train, y_train, X_val, y_val)
+
+    _save_json({"history": history}, run_dir / "history.json")
+
+    best_ckpt = checkpoint_dir / "best.pt"
+    if best_ckpt.exists():
+        trainer.load_checkpoint(best_ckpt)
+        val_metrics = trainer.evaluate(X_val, y_val)
+        logger.info(
+            "[val (best ckpt)]  macro_auc=%.4f | %s",
+            val_metrics.get("macro_auc", float("nan")),
+            "  ".join(
+                f"{c}:{val_metrics.get('per_class_auc', {}).get(c, float('nan')):.3f}"
+                for c in ["NORM", "MI", "STTC", "CD", "HYP"]
+            ),
+        )
+        _save_json(val_metrics, run_dir / "metrics_val.json")
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -300,10 +355,12 @@ def main() -> None:
         _train_cnn(cfg, dataset, run_dir, checkpoint_dir)
     elif architecture in xresnet_architectures:
         _train_xresnet(cfg, dataset, run_dir, checkpoint_dir)
+    elif architecture == "s4d":
+        _train_s4d(cfg, dataset, run_dir, checkpoint_dir)
     else:
         raise SystemExit(
             f"Unknown architecture: '{architecture}'. "
-            f"Choose from: cnn_1d, xresnet1d50, xresnet1d101, {', '.join(BASELINE_NAMES)}"
+            f"Choose from: cnn_1d, xresnet1d50, xresnet1d101, s4d, {', '.join(BASELINE_NAMES)}"
         )
 
     logger.info("Done. Outputs saved to %s", run_dir)

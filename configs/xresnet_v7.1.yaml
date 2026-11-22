@@ -1,0 +1,51 @@
+# xresnet_v7.1.yaml — XResNet1D-101 + OneCycleLR + stronger regularization
+#
+# =============================================================================
+# DIAGNOSIS v7 (xresnet1d101, AUC 0.9150, best ep27):
+#   Overfitting masivo desde ep28: loss 0.20->0.03, val_auc 0.915->0.891
+#   Causa: xresnet1d101 (8.3M params) tiene demasiada capacidad para PTB-XL
+#   sin suficiente regularizacion.
+#   xresnet1d50 (v6, 4.6M) fue mejor: 0.9174 — recipe identico pero menos params.
+#
+# v7.1 — mismo recipe, regularizacion mas fuerte:
+#   - dropout: 0.5 -> 0.7  (penaliza co-adaptacion de neuronas)
+#   - weight_decay: 1e-4 -> 3e-4  (L2 mas agresivo)
+#   Todo lo demas identico a v7/v6.
+# =============================================================================
+
+experiment:
+  name: xresnet1d101_v7.1
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+
+model:
+  architecture: xresnet1d101
+  num_classes: 5
+  kernel_size: 5
+  dropout: 0.7
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 50
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 3.0e-4
+  early_stopping_patience: 15
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: onecycle
+  lr_onecycle_pct_start: 0.3
+  lr_onecycle_div_factor: 25.0
+  augment: true
+  use_pos_weight: false
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/
