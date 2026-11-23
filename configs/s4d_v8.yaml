@@ -1,0 +1,62 @@
+# s4d_v8.yaml — Fix augmentación (σ=0.01 absoluto, scaling per-sample)
+#
+# =============================================================================
+# PROBLEMA EN v1-v7:
+#   _augment_signal() usaba:
+#   1. Gaussian noise σ=0.05·σ_lead ≈ 0.05 → 5× más ruidoso que el paper
+#      (suprime detail de P-wave y T-wave relevante para HYP/STTC)
+#   2. Amplitude scaling per-lead U(0.75,1.25) → distorsiona ratios inter-lead
+#      que codifican el eje cardíaco
+#
+# FIX (src/training/trainer.py — _augment_signal):
+#   - noise σ=0.01 absoluto (protocolo Strodthoff benchmark)
+#   - scaling per-sample U(0.8,1.2) — un escalar para las 12 derivaciones
+#   - removido lead dropout (no reportado en NeuroSyd)
+#
+# STACK COMPLETO de fixes vs v1-v5:
+#   ✓ sin bandpass/notch (v6+)
+#   ✓ weight_decay=0 en params SSM (v7+)
+#   ✓ augmentación corregida (v8)
+# =============================================================================
+
+experiment:
+  name: s4d_v8
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+  bandpass: false
+  notch: false
+  normalization: zscore
+
+model:
+  architecture: s4d
+  num_classes: 5
+  d_model: 128
+  d_state: 8
+  n_layers: 4
+  dropout: 0.1
+  gradient_checkpointing: false
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 200
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  early_stopping_patience: 150
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: cosine
+  warmup_epochs: 5
+  augment: true
+  use_pos_weight: false
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

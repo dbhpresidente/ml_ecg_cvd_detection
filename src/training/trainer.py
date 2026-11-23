@@ -158,24 +158,25 @@ class _ECGDataset(Dataset):
 def _augment_signal(x: "torch.Tensor") -> "torch.Tensor":
     """Apply random augmentations to a single ECG signal (leads, samples).
 
+    Follows the Strodthoff/NeuroSyd PTB-XL benchmark augmentation protocol:
+    - Amplitude scaling: one scalar per sample (not per lead) from U(0.8, 1.2).
+      Per-lead scaling distorts inter-lead amplitude ratios that encode cardiac
+      axis information — use a single scalar applied to all leads uniformly.
+    - Gaussian noise: σ=0.01 absolute (signals are z-score normalised, O(1)).
+      Previous σ=0.05·σ_lead was 5× too aggressive, suppressing P/T-wave detail.
+
     Args:
         x: Float32 tensor of shape (n_leads, samples).
 
     Returns:
         Augmented tensor of the same shape.
     """
-    # Amplitude scaling: each lead independently scaled by U(0.75, 1.25)
-    scale = torch.empty(x.shape[0], 1).uniform_(0.75, 1.25)
+    # Amplitude scaling: single scalar for the whole sample — preserves inter-lead ratios
+    scale = torch.empty(1).uniform_(0.8, 1.2)
     x = x * scale
 
-    # Gaussian noise: σ = 0.05 relative to per-lead std
-    std = x.std(dim=-1, keepdim=True).clamp(min=1e-6)
-    x = x + torch.randn_like(x) * (0.05 * std)
-
-    # Lead dropout: zero out 1 random lead with probability 0.3
-    if torch.rand(1).item() < 0.3:
-        lead_idx = torch.randint(0, x.shape[0], (1,)).item()
-        x[lead_idx] = 0.0
+    # Gaussian noise: σ=0.01 absolute (Strodthoff benchmark protocol)
+    x = x + torch.randn_like(x) * 0.01
 
     return x
 
@@ -469,6 +470,26 @@ class Trainer:
         return torch.device("cpu")
 
     def _build_optimizer(self) -> "torch.optim.Optimizer":
+        # SSM parameters (eigenvalues, timescales, B/C matrices) must NOT receive
+        # weight decay — wd shrinks A_real/log_dt toward zero, pinning all eigenvalues
+        # at -ln(2) and all timescales at dt=1, destroying learned kernel diversity.
+        # This follows Gu et al. 2022 (S4D) reference implementation practice.
+        _SSM_PARAM_KEYWORDS = ("A_real", "A_imag", "B_real", "B_imag",
+                               "C_real", "C_imag", "log_dt")
+        ssm_params, other_params = [], []
+        for name, p in self.model.named_parameters():
+            if any(k in name for k in _SSM_PARAM_KEYWORDS):
+                ssm_params.append(p)
+            else:
+                other_params.append(p)
+        if ssm_params:
+            return torch.optim.AdamW(
+                [
+                    {"params": other_params, "weight_decay": self.config.weight_decay},
+                    {"params": ssm_params,   "weight_decay": 0.0},
+                ],
+                lr=self.config.learning_rate,
+            )
         return torch.optim.AdamW(
             self.model.parameters(),
             lr=self.config.learning_rate,

@@ -1,0 +1,55 @@
+# s4d_v5.yaml — S4D sin early stopping para dejar cosine schedule completo
+#
+# =============================================================================
+# PROBLEMA EN v3/v4:
+#   Best siempre en ep11-14, early stop ep28-53. El cosine schedule sobre
+#   200 epochs baja lr muy lentamente: en ep53 lr sólo cayó 8% (5e-4→4.56e-4).
+#   La recuperación del overfitting ocurre cuando lr baja ~10x (~ep150-180).
+#   Early stopping mata el run antes de que el schedule haga su trabajo.
+#
+# FIX: patience=195 (equivale a no early stop — sólo para catástrofes).
+#   El modelo debe entrenarse los 200 epochs completos. El checkpoint saved
+#   es el best durante todo el run, así que el final AUC es el mejor val AUC.
+#
+# HIPÓTESIS: Mehari 2024 (0.921) alcanza su best alrededor de ep100-150
+#   cuando lr ha caído suficientemente para generalizar.
+# =============================================================================
+
+experiment:
+  name: s4d_v5
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+
+model:
+  architecture: s4d
+  num_classes: 5
+  d_model: 128
+  d_state: 8
+  n_layers: 4
+  dropout: 0.1
+  gradient_checkpointing: false
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 200
+  batch_size: 32
+  learning_rate: 1.0e-3          # lr original del paper
+  weight_decay: 1.0e-4
+  early_stopping_patience: 195   # efectivamente deshabilitado
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: cosine
+  warmup_epochs: 5
+  augment: true
+  use_pos_weight: false
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

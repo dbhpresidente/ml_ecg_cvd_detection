@@ -93,7 +93,10 @@ class S4DKernel(nn.Module):
         """
         # Always fp32 — torch.fft does not support fp16
         dt = self.log_dt.exp().float().unsqueeze(-1)   # (d_model, 1)
-        A_r = self.A_real.float()                       # (d_model, d_state)
+        # A_real must be strictly negative for SSM stability (eigenvalues in left
+        # half-plane). Without this constraint gradients can push A_real positive,
+        # causing exp(A_real * dt * l) to diverge for large l (NaN loss).
+        A_r = -F.softplus(self.A_real.float())          # (d_model, d_state), always < 0
         A_i = self.A_imag.float()
         B_r = self.B_real.float()
         B_i = self.B_imag.float()

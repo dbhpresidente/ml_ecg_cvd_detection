@@ -1,0 +1,59 @@
+# s4d_v7.yaml — Fix weight decay en parámetros SSM
+#
+# =============================================================================
+# BUG EN v1-v6:
+#   _build_optimizer() aplica weight_decay=1e-4 a TODOS los parámetros,
+#   incluyendo A_real, A_imag, B_real, B_imag, C_real, C_imag, log_dt.
+#   AdamW shrinkage sobre 200ep × 534 steps = 106,800 steps colapsa A_real
+#   y log_dt hacia cero: eigenvalues fijados en -ln(2), timescales en dt=1.
+#   La diversidad aprendida del kernel SSM queda destruida.
+#
+# FIX (src/training/trainer.py — _build_optimizer):
+#   param_groups: SSM params (A_real, A_imag, B/C, log_dt) → weight_decay=0.0
+#                 Dense params (Linear weights, LayerNorm) → weight_decay=1e-4
+#   Práctica estándar según Gu et al. 2022 (implementación de referencia S4D).
+#
+# CONFIG: igual que v6 (Strodthoff preprocessing, NeuroSyd arquitectura)
+# =============================================================================
+
+experiment:
+  name: s4d_v7
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+  bandpass: false
+  notch: false
+  normalization: zscore
+
+model:
+  architecture: s4d
+  num_classes: 5
+  d_model: 128
+  d_state: 8
+  n_layers: 4
+  dropout: 0.1
+  gradient_checkpointing: false
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 200
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  early_stopping_patience: 40
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: cosine
+  warmup_epochs: 5
+  augment: true
+  use_pos_weight: false
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/
