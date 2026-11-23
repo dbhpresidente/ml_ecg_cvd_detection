@@ -339,6 +339,9 @@ def main() -> None:
             positive_classes=cfg["data"].get("positive_classes", ["MI", "STTC", "CD", "HYP"]),
             sampling_rate=cfg["data"]["sampling_rate"],
             min_confidence=cfg["data"].get("min_confidence", 100.0),
+            normalization=cfg["data"].get("normalization", "zscore"),
+            bandpass=cfg["data"].get("bandpass", True),
+            notch=cfg["data"].get("notch", True),
         )
     except FileNotFoundError as exc:
         raise SystemExit(

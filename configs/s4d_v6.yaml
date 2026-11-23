@@ -1,0 +1,58 @@
+# s4d_v6.yaml — Strodthoff preprocessing protocol: NO bandpass, NO notch, z-score only
+#
+# =============================================================================
+# HIPÓTESIS:
+#   v1-v5 aplican bandpass 0.5-40 Hz, eliminando componentes de alta frecuencia
+#   del complejo QRS (que contiene información morfológica hasta ~150 Hz).
+#   Strodthoff 2021 (benchmark 0.936) usa explícitamente CERO filtrado previo:
+#   "trained on the original time series data without any further preprocessing
+#    such as removing baseline wander and/or filtering"
+#
+# FIX: bandpass=false, notch=false, normalization=zscore
+#   Idéntico a Strodthoff benchmark y al paper S4D-ECG (Mehari 2024, 0.921).
+#
+# CONFIG: igual que v3/v4 (NeuroSyd reference) excepto preprocessing
+#   d_model=128, d_state=8, n_layers=4, lr=1e-3, 200ep, cosine+warmup5
+# =============================================================================
+
+experiment:
+  name: s4d_v6
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+  bandpass: false
+  notch: false
+  normalization: zscore
+
+model:
+  architecture: s4d
+  num_classes: 5
+  d_model: 128
+  d_state: 8
+  n_layers: 4
+  dropout: 0.1
+  gradient_checkpointing: false
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 200
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  early_stopping_patience: 40
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: cosine
+  warmup_epochs: 5
+  augment: true
+  use_pos_weight: false
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/
