@@ -49,7 +49,10 @@ Reference implementation: Mehari & Strodthoff, *Cardiovascular Engineering and T
 |---------|---------|---------|----------|----|-----------|----|----------|---------|-------|
 | v1 | 256 | 32 | 6 | 3e-4 | OneCycleLR | 50 | 0.8890 | 13 | Baseline, C init σ=0.5 |
 | v2 | 256 | 32 | 6 | 1e-4 | OneCycleLR | 50 | 0.8899 | 14 | Resume from v1 ep13; dropout=0.3, wd=3e-4 |
-| v3 | 128 | 8 | 4 | 1e-3 | Cosine+warmup | 200 | — | — | Config from NeuroSyd paper; in progress |
+| v3 | 128 | 8 | 4 | 1e-3 | Cosine+warmup | 200 | 0.8933 | 11 | NeuroSyd config; killed ep42 (NaN — A_real drift) |
+| v4 | 128 | 8 | 4 | 5e-4 | Cosine+warmup | 200 | 0.8959 | 14 | A_real fix (-softplus); lr=5e-4 more conservative |
+| v5 | 128 | 8 | 4 | 1e-3 | Cosine+warmup | 200 | 0.8959 | ~14 | patience=195 (effectively disabled); killed ep62 — AUC drifting down |
+| v6 | 128 | 8 | 4 | 1e-3 | Cosine+warmup | 200 | **in progress** | — | **Strodthoff protocol: bandpass=False, notch=False** |
 
 ### 2.2 Key Findings — v1/v2
 
@@ -57,7 +60,15 @@ Reference implementation: Mehari & Strodthoff, *Cardiovascular Engineering and T
 
 **v2 (resume from v1 best.pt):** Added resume support to `Trainer` (saves `last.pt` with full optimizer+scheduler state each epoch). More regularisation (dropout 0.1→0.3, wd 1e-4→3e-4, lr 3e-4→1e-4) delayed early stopping (ep28→ep34) but did not break the AUC ceiling (0.8899 vs 0.8890). **Conclusion: ceiling is not a regularisation problem.**
 
-### 2.3 Root Cause Analysis — Gap vs Reference (0.889 vs 0.921)
+### 2.3 Findings — v3/v4/v5 (NeuroSyd config applied)
+
+**v3:** Applied full NeuroSyd reference config (d_model=128, d_state=8, n_layers=4, cosine+warmup5, lr=1e-3, 200ep). Best ep11 AUC=0.8933 — marginally better but still the same ceiling. Crashed ep42 with NaN: `A_real` drifted positive during training → `exp(A_real * dt * l) → inf` for L=5000 (Vandermonde explosion).
+
+**v4 (A_real stability fix):** Applied `-F.softplus(A_real)` in `S4DKernel.forward()`, guaranteeing eigenvalues stay in left half-plane. Lowered lr=5e-4 for extra stability. Completed 200 epochs without NaN. Best ep14 AUC=0.8959. Early stop ep53. Same ceiling.
+
+**v5 (scheduler hypothesis):** Hypothesis was that cosine over 200 epochs decays too slowly (at ep53, lr had fallen only 8%: 1e-3→9.2e-4). Set `patience=195` (effectively disabled) to let the full schedule run. Killed at ep62: AUC drifted DOWN through ep62 (0.895→0.882), no recovery. **Conclusion: the ceiling is not a scheduler problem.**
+
+### 2.4 Root Cause Analysis — Gap vs Reference (0.889 vs 0.921)
 
 Comparison of our implementation with NeuroSyd/S4D-ECG (Mehari 2024) revealed systematic mis-configuration:
 
@@ -73,15 +84,37 @@ Comparison of our implementation with NeuroSyd/S4D-ECG (Mehari 2024) revealed sy
 
 The reference model is **deliberately small** (d_state=8, 160K params vs our 1.1M). This avoids the Vandermonde memory explosion and trains faster, enabling 200 epochs with cosine annealing. Our v1/v2 used a 7× larger model which overfit within 13 epochs.
 
-### 2.4 Code Changes Made
+### 2.5 Preprocessing Investigation — Root Cause Found
 
-- `src/models/s4d.py`: corrected C initialisation scale from `σ=0.5` to `σ=1.0`
+After v3/v4/v5 all plateau at ~0.895, hypothesis shifted to preprocessing. The Strodthoff benchmark paper (PTB-XL reference, 0.936 AUC) explicitly states:
+
+> *"The deep learning models in this paper were trained on the original time series data **without any further preprocessing** such as removing baseline wander and/or filtering"*
+
+Our pipeline was applying a **Butterworth bandpass 0.5–40 Hz** to all runs. This removes high-frequency components of the QRS complex that carry morphological information (QRS spans up to ~150 Hz). By cutting off at 40 Hz, the model never sees the sharp slopes and fine structure of the QRS peaks — which are likely the most discriminative features for MI, STTC, and CD classification.
+
+**Bug discovered:** `scripts/train.py` initialized `PTBXLDataset` without passing `bandpass`/`notch`/`normalization` from the YAML config. These parameters always fell back to class defaults (`bandpass=True, notch=True`), making YAML overrides silently ignored. This affected **all v1–v5 S4D runs** and **all xresnet runs**.
+
+**Fix applied (commit `07deac6`):**
+- `scripts/train.py`: forward `cfg["data"].get("bandpass", True)`, `notch`, `normalization` to `PTBXLDataset`
+- `configs/s4d_v6.yaml`: `bandpass: false, notch: false, normalization: zscore`
+
+**v6 early results (Strodthoff protocol):**  
+ep1: AUC=0.8145 → ep2: 0.8499 → ep3: 0.8661 → ep4: **0.8745** (still in warmup, lr=1.0e-3 just reached)  
+For comparison v3/v4 peaked at ep11-14 at 0.893-0.896 — v6 is on a steeper trajectory and has 196 more epochs to go.
+
+### 2.6 Code Changes Made
+
+- `src/models/s4d.py`:
+  - Corrected C initialisation scale from `σ=0.5` to `σ=1.0` (matches paper)
+  - `A_r = -F.softplus(self.A_real.float())` — guarantees eigenvalues in left half-plane (SSM stability)
 - `src/training/trainer.py`:
   - Added `resume_from: Path | None` to `TrainerConfig`
   - `fit()` now saves `last.pt` every epoch (model + optimizer + scheduler + patience state)
   - Resume from `last.pt`: full state restoration
   - Resume from `best.pt` (partial): rebuilds OneCycleLR for remaining epochs
-- `scripts/train.py`: added `--resume <path>` CLI argument
+- `scripts/train.py`:
+  - Added `--resume <path>` CLI argument
+  - **Fixed preprocessing bug**: forward `bandpass`, `notch`, `normalization` from config to `PTBXLDataset`
 
 ---
 
