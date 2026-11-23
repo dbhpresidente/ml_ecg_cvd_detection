@@ -72,8 +72,8 @@ class S4DKernel(nn.Module):
         # B and C: (d_model, d_state) complex, each stored as two real tensors
         self.B_real = nn.Parameter(torch.ones(d_model, d_state))
         self.B_imag = nn.Parameter(torch.zeros(d_model, d_state))
-        self.C_real = nn.Parameter(torch.randn(d_model, d_state) * 0.5)
-        self.C_imag = nn.Parameter(torch.randn(d_model, d_state) * 0.5)
+        self.C_real = nn.Parameter(torch.randn(d_model, d_state))
+        self.C_imag = nn.Parameter(torch.randn(d_model, d_state))
 
         # log_dt: (d_model,) — per-channel log timescale, log-uniform init
         log_dt = (

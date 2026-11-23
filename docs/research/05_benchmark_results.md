@@ -49,13 +49,33 @@ The PTB-XL benchmark (Strodthoff et al., 2021) is the standard reference for com
 
 HYP (Hypertrophy) consistently achieves the lowest AUC, likely due to its lower prevalence and subtler waveform morphology.
 
-### 1.4 Recent PTB-XL Results (2026)
+### 1.4 State Space Models on PTB-XL
 
-| Model | Accuracy | F1 | Notes |
+Diagonal State Space Models (S4D) have emerged as a competitive alternative to CNNs, with an O(L log L) FFT kernel that scales well to long ECG sequences (L=5000).
+
+| Model | Macro AUC | Params | Notes |
 |---|---|---|---|
-| CNN-VAE (197K params) | 87.01% | 0.745 | Data-centric approach; arXiv:2603.07558 (2026) [UNVERIFIED] |
+| **S4D-ECG** (Mehari & Strodthoff 2024) | **0.921** | ~160K | d_model=128, d_state=8, 4 layers, 200 epochs cosine; best SSM single model |
+| xresnet1d101 (Strodthoff 2021) | 0.937 | 8.3M | Reference CNN |
 
-> Note: This result is below SOTA (xresnet1d101 AUC 0.937) but achieves it with a dramatically smaller model (197K vs ~5M parameters), demonstrating that data-centric approaches can reach competitive performance on lightweight architectures.
+The S4D-ECG model achieves 0.921 macro AUC with dramatically fewer parameters than ResNet-based models. The key configuration is counterintuitively small: `d_model=128, d_state=8`, which avoids Vandermonde memory explosion and permits 200-epoch training on consumer hardware (2–3 GB VRAM). Larger configurations (d_model=256, d_state=32) overfit within 13 epochs.
+
+> Mehari T, Strodthoff N. "Self-supervised representation learning from 12-lead ECG data." *Cardiovascular Engineering and Technology* 15, 183–199 (2024). DOI: [10.1007/s13239-024-00716-3](https://doi.org/10.1007/s13239-024-00716-3)  
+> Code: [github.com/NeuroSyd/S4D-ECG](https://github.com/NeuroSyd/S4D-ECG)
+
+### 1.5 Recent PTB-XL Results (2026)
+
+| Model | Macro AUC | Notes |
+|---|---|---|
+| **ER-JEPA** (Jul 2026) | **0.936** | Joint-Embedding Predictive Architecture; SOTA2 leaderboard |
+| **Mert et al. stacking ensemble** (Sep 2026) | **0.936** | Heterogeneous ensemble: Mamba + CNN + xLSTM + ViT + ECGFounder; arXiv:2609.12803 [UNVERIFIED] |
+| ECGFounder (solo, 2026) | 0.930 | Foundation model pre-trained on 10M+ ECGs |
+| BEAT-Net (Jan 2026) | 0.931 | 0.7M params, biomimetic spatio-temporal priors; arXiv:2601.07316 — no public code yet [UNVERIFIED] |
+| CNN-VAE 197K params (Mar 2026) | F1 0.745 | Data-centric approach; below SOTA but ultra-compact; arXiv:2603.07558 [UNVERIFIED] |
+
+**Key finding (2026):** No individual model has surpassed the Strodthoff 2021 benchmark of 0.937. The 0.936 ceiling is reached only by heterogeneous ensembles combining SSMs, CNNs, and foundation models. The gap between the best single model (xresnet1d101, 0.937) and the best ensemble (0.939) remains narrow.
+
+> Mert YE, Akdoğan E, Üvet H. "Multi-Label 12-Lead ECG Classification on the PTB-XL Dataset: A Comparative Evaluation of Deep Learning Architectures and Heterogeneous Ensemble Approaches." arXiv:2609.12803 (2026). [UNVERIFIED — verify before citing]
 
 ---
 

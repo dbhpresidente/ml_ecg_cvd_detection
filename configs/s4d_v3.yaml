@@ -1,0 +1,59 @@
+# s4d_v3.yaml — S4D con hiperparámetros replicados de NeuroSyd/S4D-ECG
+#
+# =============================================================================
+# MOTIVACION:
+#   s4d_v1/v2 usaban d_model=256, d_state=32, n_layers=6, lr=3e-4, 50 epochs.
+#   El paper de Mehari & Strodthoff (Cardiovascular Engineering 2024) reporta
+#   AUC 0.9212 con una configuración mucho más pequeña y más epochs.
+#
+# CAMBIOS vs v1/v2 (basado en NeuroSyd/S4D-ECG):
+#   d_model:   256 -> 128   (modelo 4x más pequeño, ~160K params)
+#   d_state:   32  -> 8     (kernel state 4x menor — clave anti-overfitting)
+#   n_layers:  6   -> 4     (menos capas)
+#   lr:        3e-4 -> 1e-3 (3x mayor, como en el paper)
+#   epochs:    50  -> 200   (4x más epochs con cosine annealing)
+#   scheduler: onecycle -> cosine (con warmup 5 epochs)
+#   C init:    0.5 -> 1.0   (ya corregido en s4d.py)
+#   patience:  15  -> 40    (acomodamos 200 epochs)
+#
+# TARGET: reproducir AUC ~0.921 (Mehari 2024) desde scratch
+# =============================================================================
+
+experiment:
+  name: s4d_v3
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+
+model:
+  architecture: s4d
+  num_classes: 5
+  d_model: 128
+  d_state: 8
+  n_layers: 4
+  dropout: 0.1
+  gradient_checkpointing: false   # no necesario con modelo pequeño (~160K params)
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 200
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  early_stopping_patience: 40
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: cosine
+  warmup_epochs: 5
+  augment: true
+  use_pos_weight: false
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

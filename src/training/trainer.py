@@ -104,6 +104,7 @@ class TrainerConfig:
     use_pos_weight: bool = False
     checkpoint_dir: Path = field(default_factory=lambda: Path("checkpoints"))
     device: str = "auto"
+    resume_from: Path | None = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "TrainerConfig":
@@ -112,6 +113,8 @@ class TrainerConfig:
         filtered = {k: v for k, v in d.items() if k in known}
         if "checkpoint_dir" in filtered:
             filtered["checkpoint_dir"] = Path(filtered["checkpoint_dir"])
+        if "resume_from" in filtered and filtered["resume_from"] is not None:
+            filtered["resume_from"] = Path(filtered["resume_from"])
         return cls(**filtered)
 
 
@@ -270,8 +273,50 @@ class Trainer:
         best_val_auc: float = -1.0
         patience_counter: int = 0
         history: list[dict] = []
+        start_epoch: int = 1
 
-        for epoch in range(1, cfg.epochs + 1):
+        # --- Resume from checkpoint -------------------------------------------
+        if cfg.resume_from is not None and cfg.resume_from.exists():
+            ckpt = torch.load(cfg.resume_from, map_location=self.device, weights_only=False)
+            self.model.load_state_dict(ckpt["model_state_dict"])
+            start_epoch = ckpt["epoch"] + 1
+            best_val_auc = ckpt.get("best_val_auc", ckpt["metrics"].get(
+                "macro_auc", ckpt["metrics"].get("roc_auc", -1.0)
+            ))
+            patience_counter = ckpt.get("patience_counter", 0)
+            if "optimizer_state_dict" in ckpt:
+                optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+            if "scheduler_state_dict" in ckpt:
+                target = batch_scheduler if batch_scheduler is not None else scheduler
+                target.load_state_dict(ckpt["scheduler_state_dict"])
+            elif cfg.scheduler_name == "onecycle":
+                # Partial resume (best.pt only has model weights): rebuild OneCycleLR
+                # for remaining epochs so the lr cycle is correctly scoped.
+                remaining_epochs = cfg.epochs - ckpt["epoch"]
+                remaining_steps = remaining_epochs * len(train_loader)
+                scheduler = torch.optim.lr_scheduler.OneCycleLR(
+                    optimizer,
+                    max_lr=cfg.learning_rate,
+                    total_steps=remaining_steps,
+                    pct_start=cfg.lr_onecycle_pct_start,
+                    div_factor=cfg.lr_onecycle_div_factor,
+                    final_div_factor=1e4,
+                    anneal_strategy="cos",
+                )
+                batch_scheduler = scheduler
+                logger.info(
+                    "OneCycleLR rebuilt for resume: max_lr=%.2e  remaining_steps=%d",
+                    cfg.learning_rate, remaining_steps,
+                )
+            logger.info(
+                "Resumed from '%s'  start_epoch=%d  best_auc=%.4f  patience=%d",
+                cfg.resume_from, start_epoch, best_val_auc, patience_counter,
+            )
+        # ----------------------------------------------------------------------
+
+        last_ckpt_path = cfg.checkpoint_dir / "last.pt"
+
+        for epoch in range(start_epoch, cfg.epochs + 1):
             train_loss = self._train_epoch(train_loader, criterion, optimizer, batch_scheduler)
             val_loss, y_true, y_prob = self._eval_epoch(val_loader, criterion)
 
@@ -329,7 +374,18 @@ class Trainer:
                         "Early stopping at epoch %d  (patience=%d, best_auc=%.4f)",
                         epoch, cfg.early_stopping_patience, best_val_auc,
                     )
+                    # Save last.pt before stopping so resume is possible
+                    self._save_full_checkpoint(
+                        last_ckpt_path, epoch, val_metrics, optimizer,
+                        batch_scheduler or scheduler, best_val_auc, patience_counter,
+                    )
                     break
+
+            # Save last.pt for resumability
+            self._save_full_checkpoint(
+                last_ckpt_path, epoch, val_metrics, optimizer,
+                batch_scheduler or scheduler, best_val_auc, patience_counter,
+            )
 
         return history
 
@@ -360,6 +416,29 @@ class Trainer:
     def save_checkpoint(self, path: Path, epoch: int, metrics: dict) -> None:
         torch.save(
             {"epoch": epoch, "model_state_dict": self.model.state_dict(), "metrics": metrics},
+            path,
+        )
+
+    def _save_full_checkpoint(
+        self,
+        path: Path,
+        epoch: int,
+        metrics: dict,
+        optimizer: "torch.optim.Optimizer",
+        scheduler: object,
+        best_val_auc: float,
+        patience_counter: int,
+    ) -> None:
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state_dict": self.model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
+                "metrics": metrics,
+                "best_val_auc": best_val_auc,
+                "patience_counter": patience_counter,
+            },
             path,
         )
 

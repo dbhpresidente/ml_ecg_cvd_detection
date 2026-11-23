@@ -65,6 +65,60 @@ Macro AUC on PTB-XL diagnostic superclass task (fold 10 test set, min. confidenc
 
 ---
 
+## 2a. State Space Models (SSM)
+
+### S4D — Diagonal State Space Model (Gu et al., NeurIPS 2022)
+
+State Space Models offer an alternative to both CNNs and Transformers for long-sequence modelling. The S4D (Structured State Space Diagonal) variant achieves O(L log L) complexity via FFT-based convolution, making it practical for ECG signals at L=5000 (500 Hz × 10 s).
+
+**Core formulation:**
+
+$$y = K * u, \quad K_l = 2 \,\mathrm{Re}\!\left(\sum_{n} C_n B_n \exp(A_n \Delta t \cdot l)\right)$$
+
+where $A_n = -\tfrac{1}{2} + i\pi(2n+1)$ (HiPPO-Lin initialisation), $\Delta t$ is a learnable per-channel timescale, and the convolution is computed via FFT.
+
+> Gu A, Goel K, Ré C. "On the Parameterization and Initialization of Diagonal State Space Models." *NeurIPS* (2022). arXiv: [2206.11893](https://arxiv.org/abs/2206.11893)
+
+### S4D-ECG (Mehari & Strodthoff, 2024)
+
+Application of S4D to 12-lead PTB-XL classification. Achieves **0.921 macro AUC** on the 5-superclass task with only ~160K parameters — the best single-model SSM result on this benchmark.
+
+**Reference configuration (PTB-XL superclasses):**
+
+| Hyperparameter | Value |
+|----------------|-------|
+| `d_model` | 128 |
+| `d_state` | 8 |
+| `n_layers` | 4 |
+| `dropout` | 0.1 |
+| `dt_min / dt_max` | 0.001 / 0.1 |
+| `learning_rate` | 1e-3 (AdamW) |
+| `scheduler` | Cosine annealing, 200 epochs |
+| `batch_size` | 32 |
+| C initialisation | N(0, 1) |
+| B initialisation | 1 (real) |
+
+**Key design insight:** The model is deliberately small. Increasing `d_state` (e.g., to 32 or 64) causes the Vandermonde tensor `(d_model, d_state, L)` to consume excessive memory and leads to overfitting within 10–15 epochs. The reference paper's `d_state=8` configuration trains stably for 200 epochs and reaches its best AUC around epoch 100–150.
+
+**VRAM requirements:** 2–3 GB (GTX 1070 compatible), no gradient checkpointing needed at this scale.
+
+> Mehari T, Strodthoff N. "Self-supervised representation learning from 12-lead ECG data." *Cardiovascular Engineering and Technology* 15, 183–199 (2024). DOI: [10.1007/s13239-024-00716-3](https://doi.org/10.1007/s13239-024-00716-3)  
+> Code: [github.com/NeuroSyd/S4D-ECG](https://github.com/NeuroSyd/S4D-ECG)
+
+### Mamba / S6 (Gu & Dao, 2023) — Selective SSM
+
+Mamba extends S4D with **input-dependent (selective) state transitions**, enabling the model to filter irrelevant context. Scales as O(L) in memory (recurrent inference). ECG-specific variants:
+
+- **ECGMamba (Qiang et al., 2024):** CNN-Mamba hybrid; 0.917 AUC on PTB-XL — below xresnet1d101 (0.937)
+- **S2M2ECG (2025):** Bidirectional Mamba, 0.705M params; 0.925 AUC — most compact competitive SSM
+- **ECG-Mamba-V2 (Jiang et al., 2026):** Bidirectional Vision Mamba; 0.972 AUROC on CinC 2021 (not PTB-XL superclasses directly)
+
+**Conclusion:** As of 2026, no Mamba variant individually surpasses xresnet1d101 (0.937) on PTB-XL superclasses. S4D-ECG (0.921) remains the best single-model SSM result on this specific benchmark.
+
+> Gu A, Dao T. "Mamba: Linear-Time Sequence Modeling with Selective State Spaces." arXiv:2312.00752 (2023). URL: [arxiv.org/abs/2312.00752](https://arxiv.org/abs/2312.00752)
+
+---
+
 ## 3. RNN-Based Architectures
 
 ### 3.1 LSTM / BiLSTM / GRU

@@ -230,7 +230,7 @@ def _train_xresnet(cfg: dict, dataset, run_dir: Path, checkpoint_dir: Path) -> N
         _save_json(val_metrics, run_dir / "metrics_val.json")
 
 
-def _train_s4d(cfg: dict, dataset, run_dir: Path, checkpoint_dir: Path) -> None:
+def _train_s4d(cfg: dict, dataset, run_dir: Path, checkpoint_dir: Path, resume_from: Path | None = None) -> None:
     """Train S4D (Diagonal State Space Model) in multilabel mode."""
     try:
         from src.models.s4d import S4DModel
@@ -256,6 +256,7 @@ def _train_s4d(cfg: dict, dataset, run_dir: Path, checkpoint_dir: Path) -> None:
         **cfg.get("training", {}),
         "checkpoint_dir": checkpoint_dir,
         "device": "auto",
+        **({"resume_from": resume_from} if resume_from is not None else {}),
     })
 
     logger.info("=== S4D training ===")
@@ -302,6 +303,8 @@ def parse_args() -> argparse.Namespace:
                         help="Random seed (overrides experiment.seed in config).")
     parser.add_argument("--data-dir", type=Path, default=None,
                         help="PTB-XL root directory (overrides data.raw_dir in config).")
+    parser.add_argument("--resume", type=Path, default=None,
+                        help="Resume training from this checkpoint (last.pt or best.pt).")
     return parser.parse_args()
 
 
@@ -356,7 +359,7 @@ def main() -> None:
     elif architecture in xresnet_architectures:
         _train_xresnet(cfg, dataset, run_dir, checkpoint_dir)
     elif architecture == "s4d":
-        _train_s4d(cfg, dataset, run_dir, checkpoint_dir)
+        _train_s4d(cfg, dataset, run_dir, checkpoint_dir, resume_from=args.resume)
     else:
         raise SystemExit(
             f"Unknown architecture: '{architecture}'. "
