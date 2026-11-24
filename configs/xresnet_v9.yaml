@@ -1,0 +1,58 @@
+# xresnet_v9.yaml — xresnet1d101 sin filtros
+#
+# =============================================================================
+# HIPÓTESIS:
+#   xresnet1d101 (8.3M params) se quedó en 0.9161 (v7.1) con bandpass.
+#   El benchmark Strodthoff usa xresnet1d101 sin filtros y alcanza 0.937.
+#   Si la señal raw desbloquea morfología QRS relevante, el modelo más grande
+#   debería beneficiarse más que el pequeño (más capacidad para aprender
+#   patrones sutiles de alta frecuencia).
+#
+# PREREQUISITO: v8 debe confirmar mejora sobre v6 (sin bandpass ayuda a xresnet).
+#
+# CAMBIOS vs v7.1:
+#   + bandpass: false, notch: false
+#   + augmentación corregida (en trainer.py)
+#   = OneCycleLR, lr=1e-3, 50ep, dropout=0.7, wd=3e-4 (config de v7.1)
+# =============================================================================
+
+experiment:
+  name: xresnet_v9
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+  bandpass: false
+  notch: false
+  normalization: zscore
+
+model:
+  architecture: xresnet1d101
+  num_classes: 5
+  kernel_size: 5
+  dropout: 0.7
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 50
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 3.0e-4
+  early_stopping_patience: 15
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: onecycle
+  lr_onecycle_pct_start: 0.3
+  lr_onecycle_div_factor: 25.0
+  augment: true
+  use_pos_weight: false
+  label_smoothing: 0.0
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

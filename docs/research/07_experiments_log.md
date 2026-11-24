@@ -36,6 +36,33 @@ All xresnet runs use `OneCycleLR` (unless noted), AMP fp16, batch=32, GTX 1070 8
 
 **v7/v7.1 — larger model does not help:** xresnet1d101 (8.3M vs 4.6M) overfit severely. v7.1 (dropout=0.7, wd=3e-4) partially controls overfitting but AUC 0.9161 < v6 (0.9174). **Conclusion: dataset size limits capacity utilisation. The xresnet ceiling ≈ 0.917. Gap vs benchmark (0.937) requires a different architecture.**
 
+### 1.3 Preprocessing Bug Retrospective
+
+All xresnet runs v1–v7.1 were affected by the same preprocessing bug discovered during S4D analysis: `scripts/train.py` did not forward `bandpass`/`notch`/`normalization` from YAML config to `PTBXLDataset`, always applying bandpass 0.5–40 Hz (default). The Strodthoff benchmark (xresnet1d101, **0.937 AUC**) explicitly uses zero filtering.
+
+For xresnet, this means every run trained on a signal with QRS high-frequency morphology removed. Conv 1D kernels learning directly from time series likely benefit more from this than S4D (which uses global FFT kernels).
+
+**All v1–v7.1 AUC results carry this systematic limitation.**
+
+### 1.4 Next Experiments (pending)
+
+Three experiments prepared, not yet launched. Sequential dependency: v8 must confirm improvement before v9/v10 are warranted.
+
+| Version | Arch | Key Change vs Baseline | Expected AUC | Config |
+|---------|------|------------------------|--------------|--------|
+| **v8** | xresnet1d50 | No bandpass + aug fix (vs v6) | ≥0.920 | `xresnet_v8.yaml` |
+| **v9** | xresnet1d101 | No bandpass + aug fix (vs v7.1) | ≥0.925 | `xresnet_v9.yaml` |
+| **v10** | xresnet1d50 | No bandpass + label smoothing ε=0.1 (vs v8) | ≥0.922 | `xresnet_v10.yaml` |
+
+**v8** is the critical ablation: isolates the preprocessing fix on the proven v6 recipe.  
+**v9** tests whether xresnet1d101 recovers with raw signal (Strodthoff's exact architecture).  
+**v10** tests label smoothing for HYP class calibration (HYP=2,649 samples, hardest class).
+
+**Code changes made (not yet validated on xresnet):**
+- `src/training/trainer.py`: `TrainerConfig.label_smoothing: float = 0.0` added
+- `src/training/trainer.py`: `_build_criterion()` applies `y*(1-ε)+ε/2` smoothing when `label_smoothing > 0`
+- `src/training/trainer.py`: `_augment_signal()` fixed (σ=0.01 absolute, per-sample scaling)
+
 ---
 
 ## 2. S4D (Diagonal State Space Model) Experiments (Nov 2026)

@@ -1,0 +1,61 @@
+# xresnet_v8.yaml — xresnet1d50 v6 + sin filtros (Strodthoff protocol)
+#
+# =============================================================================
+# HIPÓTESIS:
+#   xresnet_v6 (AUC=0.9174) se entrenó con bandpass 0.5-40 Hz debido a un
+#   bug en train.py que ignoraba las claves bandpass/notch del config YAML.
+#   El benchmark Strodthoff (xresnet1d101, AUC=0.937) usa cero filtrado.
+#   Las conv 1D de xresnet aprenden morfología QRS directamente de la señal:
+#   remover el filtro expone componentes de alta frecuencia (>40 Hz) del
+#   complejo QRS que son discriminativos para MI, STTC y CD.
+#
+# CAMBIOS vs v6:
+#   + bandpass: false, notch: false (fix preprocessing)
+#   + augmentación ya corregida en trainer.py (σ=0.01, per-sample, sin lead dropout)
+#   = todo lo demás igual: OneCycleLR, lr=1e-3, 50ep, dropout=0.5, wd=1e-4
+#
+# BASELINE para ablación:
+#   v6:  bandpass=True  (bug)   → AUC=0.9174
+#   v8:  bandpass=False (fix)   → objetivo: AUC≥0.920
+# =============================================================================
+
+experiment:
+  name: xresnet_v8
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+  bandpass: false
+  notch: false
+  normalization: zscore
+
+model:
+  architecture: xresnet1d50
+  num_classes: 5
+  kernel_size: 5
+  dropout: 0.5
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 50
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  early_stopping_patience: 15
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: onecycle
+  lr_onecycle_pct_start: 0.3
+  lr_onecycle_div_factor: 25.0
+  augment: true
+  use_pos_weight: false
+  label_smoothing: 0.0
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

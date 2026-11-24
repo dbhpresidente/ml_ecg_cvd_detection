@@ -102,6 +102,7 @@ class TrainerConfig:
     lr_onecycle_div_factor: float = 25.0
     augment: bool = False
     use_pos_weight: bool = False
+    label_smoothing: float = 0.0
     checkpoint_dir: Path = field(default_factory=lambda: Path("checkpoints"))
     device: str = "auto"
     resume_from: Path | None = None
@@ -498,6 +499,7 @@ class Trainer:
 
     def _build_criterion(self, y_train: np.ndarray) -> nn.Module:
         if self.config.mode == "multilabel":
+            pos_weight = None
             if self.config.use_pos_weight:
                 n_pos = y_train.sum(axis=0).clip(min=1)
                 n_neg = len(y_train) - n_pos
@@ -506,8 +508,21 @@ class Trainer:
                     "pos_weight per class: %s",
                     {c: f"{w:.3f}" for c, w in zip(_SUPERCLASSES, pos_weight.tolist())},
                 )
-                return nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-            return nn.BCEWithLogitsLoss()
+            eps = self.config.label_smoothing
+            if eps > 0.0:
+                # Label smoothing for multilabel BCE: soft targets y → y*(1-ε) + ε/2
+                # Reduces overconfidence and improves calibration on imbalanced classes.
+                logger.info("Label smoothing enabled: ε=%.3f", eps)
+                base_loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight, reduction="none")
+                smooth = eps
+
+                class _SmoothedBCE(nn.Module):
+                    def forward(self, logits, targets):
+                        soft = targets * (1.0 - smooth) + 0.5 * smooth
+                        return base_loss(logits, soft).mean()
+
+                return _SmoothedBCE()
+            return nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         # Binary: inverse-frequency class weights
         n_neg = max(int((y_train == 0).sum()), 1)
         n_pos = max(int((y_train == 1).sum()), 1)
