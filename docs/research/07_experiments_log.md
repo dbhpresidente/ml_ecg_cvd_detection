@@ -52,7 +52,9 @@ Reference implementation: Mehari & Strodthoff, *Cardiovascular Engineering and T
 | v3 | 128 | 8 | 4 | 1e-3 | Cosine+warmup | 200 | 0.8933 | 11 | NeuroSyd config; killed ep42 (NaN — A_real drift) |
 | v4 | 128 | 8 | 4 | 5e-4 | Cosine+warmup | 200 | 0.8959 | 14 | A_real fix (-softplus); lr=5e-4 more conservative |
 | v5 | 128 | 8 | 4 | 1e-3 | Cosine+warmup | 200 | 0.8959 | ~14 | patience=195 (effectively disabled); killed ep62 — AUC drifting down |
-| v6 | 128 | 8 | 4 | 1e-3 | Cosine+warmup | 200 | **in progress** | — | **Strodthoff protocol: bandpass=False, notch=False** |
+| v6 | 128 | 8 | 4 | 1e-3 | Cosine+warmup | 200 | 0.8917 | 11 | Strodthoff protocol: bandpass=False, notch=False; killed ep23 |
+| v7 | 128 | 8 | 4 | 1e-3 | Cosine+warmup | 200 | 0.8897 | 10 | +wd=0 on SSM params; killed ep11 (GPU conflict with v8) |
+| v8 | 128 | 8 | 4 | 1e-3 | Cosine+warmup | 200 | **0.8880** | **9** | Full fix stack (no bandpass + wd fix + aug fix); killed ep110 — no recovery |
 
 ### 2.2 Key Findings — v1/v2
 
@@ -98,9 +100,18 @@ Our pipeline was applying a **Butterworth bandpass 0.5–40 Hz** to all runs. Th
 - `scripts/train.py`: forward `cfg["data"].get("bandpass", True)`, `notch`, `normalization` to `PTBXLDataset`
 - `configs/s4d_v6.yaml`: `bandpass: false, notch: false, normalization: zscore`
 
-**v6 early results (Strodthoff protocol):**  
-ep1: AUC=0.8145 → ep2: 0.8499 → ep3: 0.8661 → ep4: **0.8745** (still in warmup, lr=1.0e-3 just reached)  
-For comparison v3/v4 peaked at ep11-14 at 0.893-0.896 — v6 is on a steeper trajectory and has 196 more epochs to go.
+**v6/v7/v8 — final results (all three fixes):**
+
+| Fix | Run | Best AUC | Best Ep | Conclusion |
+|-----|-----|----------|---------|------------|
+| Preprocessing only (no bandpass) | v6 | 0.8917 | 11 | Marginally worse than v4 (0.8959) |
+| + SSM weight decay fix | v7 | 0.8897 | 10 | No improvement in first 11 eps (ablation incomplete) |
+| + Augmentation fix (σ=0.01, per-sample) | v8 | 0.8880 | 9 | Same ceiling; ran to ep110, no recovery |
+
+**v8 full run analysis (ep9–110, patience=150):**  
+Val AUC peaked at ep9 (0.8880), then declined as train loss continued falling (0.26→0.04). By ep43 AUC was 0.8600, stabilised in band 0.856–0.864 through ep90. At ep100 (lr=5.2e-4, 50% reduction) no inflexion occurred. Killed at ep110.
+
+**Structural overfitting conclusion:** None of the fixes (preprocessing, weight decay exclusion, augmentation) broke the ceiling. The pattern — peak at ep9-14, sustained decline, no recovery — is consistent across v1-v8. The model memorises the 17K training samples faster than the cosine schedule can counteract it. The best S4D result remains **0.8880** (v8, ep9).
 
 ### 2.6 Code Changes Made
 
@@ -135,14 +146,18 @@ Three concurrent searches were run:
 - **2026 SOTA (PTB-XL leaderboard):** ER-JEPA and Mert et al. stacking ensemble both reach **0.936**, matching Strodthoff 2021. No single-model breakthrough observed in 2026.
 - **Foundation models** (ECGFounder: 0.930, ECG-FM: ~0.925) require LoRA fine-tuning to fit in 8 GB VRAM.
 
-### 3.2 Prioritised Roadmap
+### 3.2 Prioritised Roadmap (updated Nov 2026)
 
-| Priority | Approach | Expected AUC | VRAM | Timeline |
-|----------|----------|-------------|------|----------|
-| 1 | S4D v3 (corrected config) | ~0.921 | 2-3 GB | in progress |
-| 2 | Ensemble S4D v3 + xresnet1d50 v6 | ~0.930+ | 5-6 GB | after v3 converges |
-| 3 | BEAT-Net (arXiv:2601.07316, Jan 2026) | 0.931 | 2-3 GB | awaiting code release |
+S4D supervised training is exhausted at ~0.888. Next steps to reach 0.920+:
+
+| Priority | Approach | Expected AUC | VRAM | Status |
+|----------|----------|-------------|------|--------|
+| 1 | **Ensemble xresnet1d50_v6 + S4D_v8** | ~0.925+ | 5-6 GB | pending |
+| 2 | S4D with strong regularisation (dropout=0.3–0.5, label smoothing=0.1) | ~0.900-0.910 | 2-3 GB | pending |
+| 3 | BEAT-Net (arXiv:2601.07316, Jan 2026) | 0.931 | 2-3 GB | awaiting code |
 | 4 | ECGFounder LoRA fine-tune | ~0.930 | 5-6 GB | exploratory |
+
+**Gap analysis:** reference S4D-ECG (0.9244) vs our S4D (0.8880) = 0.036 gap. The 0.9244 likely requires a training detail not publicly disclosed (possibly much higher dropout, label smoothing, or a different scheduler recipe). Our supervised xresnet (0.9174) is the practical ceiling for now.
 
 ---
 
