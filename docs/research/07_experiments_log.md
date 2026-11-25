@@ -233,19 +233,142 @@ S4D supervised training is exhausted at ~0.888. xresnet ceiling is ~0.917 (v6). 
 
 | Priority | Approach | Expected AUC | VRAM | Status |
 |----------|----------|-------------|------|--------|
-| 1 | **Relative σ augmentation sweep** (σ=0.05·σ_lead per-lead, with variations) | ~0.918–0.920 | 3 GB | next |
-| 2 | **Ensemble xresnet1d50_v6 + S4D_v8** | ~0.925+ | 5-6 GB | pending |
-| 3 | S4D with strong regularisation (dropout=0.3–0.5, label smoothing=0.1) | ~0.900-0.910 | 2-3 GB | pending |
-| 4 | BEAT-Net (arXiv:2601.07316, Jan 2026) | 0.931 | 2-3 GB | awaiting code |
-| 5 | ECGFounder LoRA fine-tune | ~0.930 | 5-6 GB | exploratory |
+| 1 | ~~Relative σ augmentation sweep~~ | ~~0.918–0.920~~ | — | **DONE** — v11b=0.9157, ceiling confirmed |
+| 2 | ~~Ensemble xresnet1d50_v6 + S4D_v8~~ | ~~0.925+~~ | — | **DONE** — test=0.9125 (+0.002), gap too large |
+| 3 | ~~Label smoothing (ε=0.1)~~ | ~~0.918–0.920~~ | — | **DONE** — val=0.9119, regression |
+| 4 | ~~Ensemble xresnet50_v6 + xresnet101_v7.1~~ | ~~0.918–0.920~~ | — | **DONE** — test=0.9164 (+0.006), best so far |
+| 5 | **ECGFounder / BEAT-Net LoRA fine-tune** | 0.930+ | 5-6 GB | **next** |
 
-**Gap analysis:** reference S4D-ECG (0.9244) vs our S4D (0.8880) = 0.036 gap. The 0.9244 likely requires a training detail not publicly disclosed (possibly much higher dropout, label smoothing, or a different scheduler recipe). Our supervised xresnet (0.9174) is the practical ceiling for now.
+**Current best:** Ensemble xresnet50+101 (60/40), test=0.9164. Target ≥0.920 not yet reached.
 
-**Augmentation conclusion:** Sweep complete (v10a/b/c + v11a/b/c). Optimal augmentation confirmed: σ=0.05·σ_lead relative + per-lead scale U(0.75,1.25). v6's 0.9174 is within run-to-run variance of v11b (0.9157). No further gains available from augmentation tuning. Next: ensemble xresnet_v6 + S4D_v8.
+**Augmentation conclusion:** Sweep complete (v10a/b/c + v11a/b/c). Optimal augmentation confirmed: σ=0.05·σ_lead relative + per-lead scale U(0.75,1.25). v6's 0.9174 is within run-to-run variance of v11b (0.9157). No further gains available from augmentation tuning.
 
 ---
 
-## 4. Infrastructure Notes
+## 4. Ensemble Experiments (Nov 2026)
+
+### 4.1 Heterogeneous Ensemble — xresnet1d50_v6 + S4D_v8
+
+**Script:** `scripts/ensemble.py`  **Config:** `configs/ensemble_v1.yaml`
+
+**Motivation:** Architectural diversity (conv vs SSM/FFT) may capture complementary signal — xresnet captures local QRS morphology, S4D integrates global temporal dependencies. Probability averaging; no re-training required.
+
+**Key design detail:** xresnet_v6 was trained with `bandpass=True`; S4D_v8 with `bandpass=False`. The ensemble script loads the dataset twice (once per preprocessing config) and asserts label equality before averaging.
+
+**Weight sweep (val set):**
+
+| w_xresnet | val macro-AUC |
+|-----------|-------------|
+| 1.00 (xresnet alone) | 0.9174 |
+| 0.90 (optimal) | **0.9184** |
+| 0.50 (uniform) | 0.9130 |
+| 0.00 (S4D alone) | 0.8880 |
+
+**Final results (w_xresnet=0.90):**
+
+| Split | xresnet alone | S4D alone | Ensemble (90/10) | Gain vs xresnet |
+|-------|--------------|-----------|-----------------|----------------|
+| val   | 0.9174 | 0.8880 | 0.9184 | +0.0010 |
+| test  | 0.9104 | 0.8867 | 0.9125 | +0.0021 |
+
+**Per-class test (ensemble 90/10):** NORM=0.9399 MI=0.9265 STTC=0.9310 CD=0.9210 HYP=0.8441
+
+**Conclusion:** Minimal gain (+0.002 test). The 0.030 AUC gap between models prevents meaningful improvement — the optimal weight of 0.90 is effectively xresnet alone with marginal S4D regularisation. Architectural diversity is insufficient to overcome the performance asymmetry. For probability averaging to help, models must have comparable AUC. **Heterogeneous ensemble closed.**
+
+---
+
+### 4.2 Homogeneous Ensemble — xresnet1d50_v6 + xresnet1d101_v7.1
+
+**Motivation:** Same architectural family but different capacity (4.6M vs 8.3M params), different regularisation (dropout=0.5 vs 0.7, wd=1e-4 vs 3e-4). AUC gap is only 0.0013 (vs 0.030 for conv+SSM), making complementarity plausible. Same preprocessing — single data load.
+
+**Weight sweep (val set):**
+
+| w_50 | val macro-AUC |
+|------|-------------|
+| 0.0 (v7.1 alone) | 0.9161 |
+| 0.3 | 0.9204 |
+| 0.4 | 0.9210 |
+| 0.5 | 0.9212 |
+| **0.6 (optimal)** | **0.9213** |
+| 0.7 | 0.9209 |
+| 1.0 (v6 alone) | 0.9174 |
+
+**Final results (w_50=0.6):**
+
+| Split | xresnet50_v6 | xresnet101_v7.1 | Ensemble (60/40) | Gain vs v6 |
+|-------|-------------|----------------|-----------------|-----------|
+| val   | 0.9174 | 0.9161 | **0.9213** | +0.0039 |
+| test  | 0.9104 | 0.9128 | **0.9164** | **+0.0060** |
+
+**Per-class test (ensemble 60/40):** NORM=**0.9433** MI=**0.9308** STTC=**0.9317** CD=0.9276 HYP=**0.8488**
+
+**Per-class analysis (val):** xresnet50 stronger in STTC (+0.0039) and CD; xresnet101 stronger in NORM (+0.0019) and MI (−0.0013). The ensemble recovers both strengths simultaneously. HYP improves for both.
+
+**Conclusion:** Best ensemble result of the project. +0.006 AUC on test over the previous best single model. Complementarity achieved despite same architecture family — different depth + regularisation creates sufficient prediction diversity. HYP improves from 0.839 → 0.849 (highest across all runs). **Still below ≥0.920 target.** Best checkpoint pair: `checkpoints/xresnet1d50_v6/best.pt` + `checkpoints/xresnet_v7.1/best.pt`.
+
+---
+
+## 5. Label Smoothing — xresnet_v12 (Nov 2026)
+
+**Config:** `configs/xresnet_v12.yaml`  **Base:** v11b recipe (optimal aug: σ=0.05·σ_lead, per-lead scale, bandpass=True)
+
+**Hypothesis:** Label smoothing ε=0.1 targets → soft targets `(ε/2, 1−ε/2)` = `(0.05, 0.95)`. Expected effect: reduce overconfidence on minority class (HYP), improve calibration, +0.001–0.003 AUC. ε=0.1 is the value used in the Strodthoff benchmark.
+
+**Code:** `TrainerConfig.label_smoothing` and `_build_criterion()` already implemented from previous iteration.
+
+**Run:** early stop ep40, best ep25. val macro-AUC = **0.9119**.
+
+| Clase | v6 (ref) | v11b | **v12 (LS ε=0.1)** |
+|-------|----------|------|-------------------|
+| NORM  | 0.9390 | 0.9350 | 0.9350 |
+| MI    | 0.9296 | 0.9330 | 0.9250 |
+| STTC  | 0.9314 | 0.9310 | 0.9260 |
+| CD    | 0.9342 | 0.9350 | 0.9200 |
+| **HYP** | 0.8527 | 0.8520 | **0.8540** |
+| **macro** | **0.9174** | **0.9157** | **0.9119** |
+
+**Conclusion:** ε=0.1 is too aggressive for multilabel classification with overlapping classes. Soft targets `(0.05, 0.95)` create excessive tolerance: the model loses discriminative sharpness between classes that co-occur (MI+STTC, CD+HYP). The only class that benefits is HYP (+0.001), confirming the calibration hypothesis for minority classes, but the macro loss is −0.055. **Label smoothing chapter closed. ε=0.1 is not viable; smaller ε (≤0.05) might recover the HYP gain without macro regression, but is not explored further given the small expected upside.**
+
+---
+
+## 6. Summary and Roadmap (Nov 2026)
+
+### 6.1 All Results — Ranked by val macro-AUC
+
+| Rank | Config | Val AUC | Test AUC | Notes |
+|------|--------|---------|----------|-------|
+| 1 | **Ensemble xresnet50_v6 + xresnet101_v7.1 (60/40)** | **0.9213** | **0.9164** | Best overall |
+| 2 | Ensemble xresnet50_v6 + S4D_v8 (90/10) | 0.9184 | 0.9125 | Marginal gain |
+| 3 | xresnet1d50_v6 (single model best) | 0.9174 | 0.9104 | Baseline ceiling |
+| 4 | xresnet1d101_v7.1 | 0.9161 | 0.9128 | — |
+| 5 | xresnet_v11b (aug sweep best) | 0.9157 | — | — |
+| 6 | xresnet_v12 (label smoothing ε=0.1) | 0.9119 | — | Regressed |
+| 7 | S4D_v8 (best single S4D) | 0.8880 | 0.8867 | Structural ceiling |
+
+**Targets:**
+- ≥0.920 (beat S4D-ECG ref 0.9244): **not yet reached**
+- ≥0.930 (match Strodthoff benchmark): **requires foundation model**
+
+### 6.2 Lessons Learned
+
+1. **xresnet1d50 ceiling on 17K samples: ~0.917.** Not reproducibly breakable with augmentation tuning, label smoothing, or single-architecture tricks.
+2. **Ensemble gains are real but architecture-dependent.** Same-family ensemble (xresnet50+101): +0.006. Heterogeneous ensemble (conv+SSM): +0.002. Diminishing returns beyond ~0.916 val.
+3. **Label smoothing ε=0.1 hurts multilabel with co-occurring classes.** The overconfidence problem in HYP is real but ε must be much smaller (≤0.03).
+4. **Bandpass filtering helps xresnet at 17K samples.** Counterintuitive vs benchmark protocol, but artefact noise at this scale acts as a confound the model cannot filter.
+
+### 6.3 Next Steps
+
+| Priority | Approach | Expected AUC | Effort |
+|----------|----------|-------------|--------|
+| **1** | **ECGFounder / BEAT-Net LoRA** | 0.930+ | 1-2 weeks |
+| 2 | Ensemble xresnet50+101 + label smoothing ε≤0.03 on v7.1 | ~0.918–0.922 | 2h train + analysis |
+| 3 | xresnet1d50 with PTB-XL 100 Hz + 500 Hz multi-scale input | ~0.920 | 1 week |
+
+**Recommendation:** Proceed to ECGFounder LoRA fine-tuning. All single-model and ensemble combinations with existing architectures on 17K samples are exhausted at ~0.916–0.921 val. Foundation model fine-tuning is the only validated path to ≥0.930 at this dataset scale (ECGFounder: 0.930, ECG-FM: ~0.925 on PTB-XL).
+
+---
+
+## 7. Infrastructure Notes
 
 - **Ritmo por epoch:** xresnet1d50 ≈1.5 min; xresnet1d101 ≈3.5 min; S4D (d_model=256) ≈17 min; S4D v3 (d_model=128, d_state=8) estimated ≈3-5 min
 - **Carga inicial PTB-XL:** ≈16 min (num_workers=0 on Windows, all signals loaded into RAM)

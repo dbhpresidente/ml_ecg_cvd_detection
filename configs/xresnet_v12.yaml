@@ -1,0 +1,63 @@
+# xresnet_v12.yaml — Label smoothing ε=0.1 sobre receta v11b
+#
+# =============================================================================
+# HIPÓTESIS:
+#   Label smoothing suaviza los targets duros (0/1) → soft targets (ε/2, 1−ε/2).
+#   Efecto esperado:
+#     - Reduce sobreconfianza → mejor calibración, especialmente en HYP (clase rara).
+#     - Actúa como regularización implícita: +0.001–0.003 AUC sobre v11b (0.9157).
+#
+# BASE: v11b (aug óptima confirmada en sweep v10/v11):
+#   - augment_noise_relative=True, noise_std=0.05, scale_per_lead=True
+#   - bandpass=True, OneCycleLR, lr=1e-3, wd=1e-4
+#
+# CAMBIO vs v11b:
+#   - label_smoothing: 0.0 → 0.1
+#
+# Valores típicos en literatura ECG: ε ∈ [0.05, 0.15].
+# ε=0.1 es el default de Strodthoff 2021 (benchmark PTB-XL).
+# =============================================================================
+
+experiment:
+  name: xresnet_v12
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+  bandpass: true
+  notch: false
+  normalization: zscore
+
+model:
+  architecture: xresnet1d50
+  num_classes: 5
+  kernel_size: 5
+  dropout: 0.5
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 50
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  early_stopping_patience: 15
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: onecycle
+  lr_onecycle_pct_start: 0.3
+  lr_onecycle_div_factor: 25.0
+  augment: true
+  augment_noise_std: 0.05
+  augment_noise_relative: true
+  augment_scale_per_lead: true
+  use_pos_weight: false
+  label_smoothing: 0.1
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

@@ -1,0 +1,65 @@
+# ensemble_v1.yaml — Ensemble xresnet1d50_v6 + S4D_v8
+#
+# Estrategia: promedio ponderado de probabilidades sigmoid (probability averaging).
+# No requiere re-entrenamiento. Usa los checkpoints best.pt de cada modelo.
+#
+# Modelos:
+#   xresnet1d50_v6  val_macro_auc=0.9174  (bandpass=True,  OneCycleLR)
+#   s4d_v8          val_macro_auc=0.8880  (bandpass=False, cosine)
+#
+# Diversidad arquitectónica:
+#   xresnet1d50: convolucional (captura patrones locales, morfología QRS)
+#   S4D:         estado espacio global (captura dependencias de largo alcance)
+#
+# Hipótesis: la diversidad conv/SSM permite corregir errores complementarios,
+# en especial en HYP (xresnet=0.853, S4D=~0.84) y STTC.
+#
+# Uso:
+#   python scripts/ensemble.py                     # defaults abajo
+#   python scripts/ensemble.py --split val         # validación
+#   python scripts/ensemble.py --weights 0.6 0.4   # ponderado hacia xresnet
+
+experiment:
+  name: ensemble_xresnet_v6_s4d_v8
+
+models:
+  xresnet:
+    architecture: xresnet1d50
+    checkpoint: checkpoints/xresnet1d50_v6/best.pt
+    num_classes: 5
+    kernel_size: 5
+    dropout: 0.5
+    preprocessing:
+      bandpass: true
+      notch: true
+      normalization: zscore
+      sampling_rate: 500
+
+  s4d:
+    architecture: s4d
+    checkpoint: checkpoints/s4d_v8/best.pt
+    num_classes: 5
+    d_model: 128
+    d_state: 8
+    n_layers: 4
+    dropout: 0.1
+    gradient_checkpointing: false
+    preprocessing:
+      bandpass: false
+      notch: false
+      normalization: zscore
+      sampling_rate: 500
+
+ensemble:
+  strategy: weighted_average   # 'uniform' o 'weighted_average'
+  weights:
+    xresnet: 0.5
+    s4d: 0.5
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  min_confidence: 0.0
+
+logging:
+  output_dir: outputs/ensemble_xresnet_v6_s4d_v8/
