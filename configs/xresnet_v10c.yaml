@@ -1,0 +1,59 @@
+# xresnet_v10c.yaml — ablación augmentación: σ=0.05, scale per-lead (= aug original v6)
+#
+# =============================================================================
+# HIPÓTESIS:
+#   Replica exactamente la augmentación de v6 (que logró AUC=0.9174) pero
+#   con los otros bugs corregidos (bandpass desde YAML, preprocessing forwarded).
+#   Si v10c ≈ 0.9174, confirma que la augmentación "incorrecta" era mejor
+#   regularización para 17K muestras y que σ=0.05 + per-lead es el sweet spot.
+#   Control final antes de concluir el sweep de augmentación.
+#
+# CAMBIOS vs v6 (reproduce su augmentación exacta con código corregido):
+#   + augment_noise_std: 0.05
+#   + augment_scale_per_lead: true  (per-lead U(0.75,1.25))
+#   = bandpass: true (igual que v6, ahora correctamente forwarded)
+#   = sin lead dropout (ya se había removido en el fix)
+# =============================================================================
+
+experiment:
+  name: xresnet_v10c
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+  bandpass: true
+  notch: false
+  normalization: zscore
+
+model:
+  architecture: xresnet1d50
+  num_classes: 5
+  kernel_size: 5
+  dropout: 0.5
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 50
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  early_stopping_patience: 15
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: onecycle
+  lr_onecycle_pct_start: 0.3
+  lr_onecycle_div_factor: 25.0
+  augment: true
+  augment_noise_std: 0.05
+  augment_scale_per_lead: true
+  use_pos_weight: false
+  label_smoothing: 0.0
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

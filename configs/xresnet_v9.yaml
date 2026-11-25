@@ -1,19 +1,16 @@
-# xresnet_v9.yaml — xresnet1d101 sin filtros
+# xresnet_v9.yaml — xresnet1d101 con bandpass (revisado tras v8)
 #
 # =============================================================================
 # HIPÓTESIS:
 #   xresnet1d101 (8.3M params) se quedó en 0.9161 (v7.1) con bandpass.
-#   El benchmark Strodthoff usa xresnet1d101 sin filtros y alcanza 0.937.
-#   Si la señal raw desbloquea morfología QRS relevante, el modelo más grande
-#   debería beneficiarse más que el pequeño (más capacidad para aprender
-#   patrones sutiles de alta frecuencia).
-#
-# PREREQUISITO: v8 debe confirmar mejora sobre v6 (sin bandpass ayuda a xresnet).
+#   v8 demostró que bandpass=false EMPEORA (0.9099 vs 0.9174) — se revierte.
+#   Mayor capacidad (101 vs 50) + augmentación corregida + bandpass=true
+#   debería superar v7.1 (0.9161) y acercarse al objetivo ≥0.920.
 #
 # CAMBIOS vs v7.1:
-#   + bandpass: false, notch: false
-#   + augmentación corregida (en trainer.py)
-#   = OneCycleLR, lr=1e-3, 50ep, dropout=0.7, wd=3e-4 (config de v7.1)
+#   = bandpass: true (igual que v7.1, confirmado por v8)
+#   + augmentación corregida (σ=0.01, per-sample, sin lead dropout)
+#   = OneCycleLR, lr=1e-3, 50ep, dropout=0.7, wd=3e-4
 # =============================================================================
 
 experiment:
@@ -26,7 +23,7 @@ data:
   sampling_rate: 500
   leads: 12
   min_confidence: 0.0
-  bandpass: false
+  bandpass: true
   notch: false
   normalization: zscore
 

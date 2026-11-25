@@ -1,0 +1,58 @@
+# xresnet_v10a.yaml — ablación augmentación: σ=0.05, scale per-sample
+#
+# =============================================================================
+# HIPÓTESIS:
+#   v8/v9 (aug nueva: σ=0.01, per-sample) quedaron ~0.006 AUC por debajo de
+#   v6/v7.1 (aug vieja: σ=0.05·σ_lead≈0.05, per-lead, con lead dropout).
+#   Este experimento aísla el efecto del ruido: aumenta σ 5× (0.01→0.05)
+#   manteniendo scale per-sample y sin lead dropout.
+#   Si el ruido más agresivo es el factor clave, debería recuperar ~0.9174.
+#
+# CAMBIOS vs v6 recipe (bandpass=true, aug nueva):
+#   + augment_noise_std: 0.05  (5× más ruido que el actual 0.01)
+#   = augment_scale_per_lead: false (per-sample, igual que v8/v9)
+#   = sin lead dropout
+# =============================================================================
+
+experiment:
+  name: xresnet_v10a
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+  bandpass: true
+  notch: false
+  normalization: zscore
+
+model:
+  architecture: xresnet1d50
+  num_classes: 5
+  kernel_size: 5
+  dropout: 0.5
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 50
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  early_stopping_patience: 15
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: onecycle
+  lr_onecycle_pct_start: 0.3
+  lr_onecycle_div_factor: 25.0
+  augment: true
+  augment_noise_std: 0.05
+  augment_scale_per_lead: false
+  use_pos_weight: false
+  label_smoothing: 0.0
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

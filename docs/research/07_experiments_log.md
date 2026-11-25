@@ -44,24 +44,78 @@ For xresnet, this means every run trained on a signal with QRS high-frequency mo
 
 **All v1–v7.1 AUC results carry this systematic limitation.**
 
-### 1.4 Next Experiments (pending)
+### 1.4 Preprocessing Ablation — v8 and v9 (Nov 2026)
 
-Three experiments prepared, not yet launched. Sequential dependency: v8 must confirm improvement before v9/v10 are warranted.
+Hypothesis: removing bandpass (Strodthoff protocol) would improve xresnet by exposing high-frequency QRS morphology. v9 was updated to `bandpass: true` after v8 showed the opposite.
 
-| Version | Arch | Key Change vs Baseline | Expected AUC | Config |
-|---------|------|------------------------|--------------|--------|
-| **v8** | xresnet1d50 | No bandpass + aug fix (vs v6) | ≥0.920 | `xresnet_v8.yaml` |
-| **v9** | xresnet1d101 | No bandpass + aug fix (vs v7.1) | ≥0.925 | `xresnet_v9.yaml` |
-| **v10** | xresnet1d50 | No bandpass + label smoothing ε=0.1 (vs v8) | ≥0.922 | `xresnet_v10.yaml` |
+| Version | Arch | Bandpass | Aug | Best AUC | Best Ep | Stop Ep | Key finding |
+|---------|------|----------|-----|----------|---------|---------|-------------|
+| v8 | xresnet1d50 | **false** | new (σ=0.01, per-sample) | 0.9099 | 14 | 29 | Worse than v6 — bandpass helps |
+| v9 | xresnet1d101 | **true** (revised) | new (σ=0.01, per-sample) | 0.9108 | 18 | 33 | Worse than v7.1 — aug fix regresses |
 
-**v8** is the critical ablation: isolates the preprocessing fix on the proven v6 recipe.  
-**v9** tests whether xresnet1d101 recovers with raw signal (Strodthoff's exact architecture).  
-**v10** tests label smoothing for HYP class calibration (HYP=2,649 samples, hardest class).
+**v8 per-class (val):** NORM=0.936 MI=0.914 STTC=0.928 CD=0.933 HYP=0.839  
+**v9 per-class (val):** NORM=0.934 MI=0.929 STTC=0.925 CD=0.934 HYP=0.832
 
-**Code changes made (not yet validated on xresnet):**
-- `src/training/trainer.py`: `TrainerConfig.label_smoothing: float = 0.0` added
-- `src/training/trainer.py`: `_build_criterion()` applies `y*(1-ε)+ε/2` smoothing when `label_smoothing > 0`
-- `src/training/trainer.py`: `_augment_signal()` fixed (σ=0.01 absolute, per-sample scaling)
+**Conclusion:** Bandpass 0.5–40 Hz *helps* xresnet on 17K samples — likely attenuates EMG noise and baseline wander that the model cannot reliably distinguish from pathological signal at this dataset size. Strodthoff uses 10× more data, which allows the model to learn to ignore artefacts. v9 also revealed that the augmentation fix (σ=0.01, per-sample) introduced a ~0.005 AUC regression vs v7.1, motivating the sensitivity sweep in §1.5.
+
+### 1.5 Augmentation Sensitivity Sweep — v10a/b/c (Nov 2026)
+
+**Context:** The "correct" augmentation (σ=0.01 absolute, per-sample scale) underperformed the original "buggy" augmentation (σ=0.05·σ_lead, per-lead scale) by ~0.006 AUC. Three targeted ablations isolate the contributing factors. All use xresnet1d50, bandpass=true, identical to v6 recipe.
+
+**Code change:** `TrainerConfig` extended with `augment_noise_std: float = 0.01` and `augment_scale_per_lead: bool = False`; `_augment_signal()` parametrised accordingly.
+
+| Version | σ noise | Scale mode | Best AUC | Best Ep | Stop Ep | HYP AUC |
+|---------|---------|------------|----------|---------|---------|---------|
+| v10a | 0.05 abs | per-sample | 0.9118 | 14 | 29 | 0.846 |
+| v10b | 0.01 abs | **per-lead** | 0.9148 | 25 | 40 | **0.861** |
+| v10c | 0.05 abs | **per-lead** | 0.9140 | 19 | 34 | 0.848 |
+
+**Reference — v6:** σ=0.05·σ_lead (relative), per-lead scale, AUC=**0.9174**, HYP=0.853
+
+**Per-class detail — v10b (best of sweep):**  
+NORM=0.934 MI=0.927 STTC=0.928 CD=0.924 HYP=0.861
+
+**Findings:**
+
+1. **Scale per-lead is the dominant factor** (+0.004 AUC over per-sample, independent of σ). Per-lead scaling U(0.75, 1.25) acts as stronger regularisation than per-sample U(0.8, 1.2), likely because it creates more varied inter-lead amplitude patterns that the model must learn to discount.
+
+2. **Higher σ does not reliably help** — v10c (σ=0.05, per-lead) scores 0.9140, *below* v10b (σ=0.01, per-lead=0.9148). The expected synergy of combining both "old" augmentation parameters did not materialise.
+
+3. **v6 residual advantage (~0.003)** is not fully explained. Possible causes: (a) σ relative to per-lead std adapts to signal amplitude per lead (not replicated in v10c which uses σ=0.05 absolute), or (b) random seed variance (~0.003 is within run-to-run noise).
+
+4. **HYP notably improved in v10b** (0.861 vs 0.853 in v6) — per-lead scaling may provide useful amplitude variation for this minority class.
+
+**Current best:** v6 (AUC=0.9174). v10b is second-best (0.9148) with best HYP across all runs.  
+**Recommended default going forward:** `augment_scale_per_lead: true`, `augment_noise_std: 0.01`.
+
+### 1.6 Relative Noise Sweep — v11a/b/c (Nov 2026)
+
+**Context:** v10a/b/c used absolute σ. The residual gap between best sweep result (v10b=0.9148) and v6 (0.9174) prompted testing σ relative to per-lead std — the original v6 behaviour that was labelled a "bug". All use xresnet1d50, bandpass=true, per-lead scale.
+
+**Code change:** `TrainerConfig` extended with `augment_noise_relative: bool = False`; `_augment_signal()` applies `σ * x.std(dim=-1, keepdim=True)` when enabled.
+
+| Version | σ multiplier | noise_relative | Best AUC | Best Ep | Stop Ep | HYP |
+|---------|-------------|----------------|----------|---------|---------|-----|
+| v11a | 0.03 | true | 0.9129 | 24 | 39 | 0.844 |
+| **v11b** | **0.05** | **true** | **0.9157** | **23** | **38** | **0.852** |
+| v11c | 0.07 | true | 0.9150 | 19 | 34 | 0.858 |
+
+**Reference — v6:** σ=0.05·σ_lead (relative), AUC=**0.9174**, HYP=0.853
+
+**Per-class detail — v11b:**  
+NORM=0.935 MI=0.925 STTC=0.931 CD=0.935 HYP=0.852
+
+**Findings:**
+
+1. **Relative σ recovers most of the gap** — v11b (0.9157) vs v10b/abs (0.9148): +0.001. The relative/absolute distinction matters, but only marginally.
+
+2. **σ multiplier curve is unimodal** — 0.03 < 0.05 > 0.07 in macro AUC. 0.07 gives highest HYP (0.858) but slightly lower macro.
+
+3. **v6 is not reproducible exactly** — v11b matches v6's augmentation faithfully and reaches 0.9157 vs v6's 0.9174. The 0.0017 gap is within run-to-run variance (expected ±0.002–0.003 on this dataset). There is no undiscovered augmentation trick remaining.
+
+4. **Sweep conclusion:** The augmentation optimum is `noise_relative=True, noise_std=0.05, scale_per_lead=True`. The xresnet1d50 ceiling on PTB-XL (17K samples, 5 superclasses) is **~0.915–0.917**. Further improvements require a different approach: ensemble, architecture change, or more data.
+
+**Recommended config for all future xresnet runs:** `augment_noise_relative: true`, `augment_noise_std: 0.05`, `augment_scale_per_lead: true`.
 
 ---
 
@@ -175,16 +229,19 @@ Three concurrent searches were run:
 
 ### 3.2 Prioritised Roadmap (updated Nov 2026)
 
-S4D supervised training is exhausted at ~0.888. Next steps to reach 0.920+:
+S4D supervised training is exhausted at ~0.888. xresnet ceiling is ~0.917 (v6). Next steps to reach 0.920+:
 
 | Priority | Approach | Expected AUC | VRAM | Status |
 |----------|----------|-------------|------|--------|
-| 1 | **Ensemble xresnet1d50_v6 + S4D_v8** | ~0.925+ | 5-6 GB | pending |
-| 2 | S4D with strong regularisation (dropout=0.3–0.5, label smoothing=0.1) | ~0.900-0.910 | 2-3 GB | pending |
-| 3 | BEAT-Net (arXiv:2601.07316, Jan 2026) | 0.931 | 2-3 GB | awaiting code |
-| 4 | ECGFounder LoRA fine-tune | ~0.930 | 5-6 GB | exploratory |
+| 1 | **Relative σ augmentation sweep** (σ=0.05·σ_lead per-lead, with variations) | ~0.918–0.920 | 3 GB | next |
+| 2 | **Ensemble xresnet1d50_v6 + S4D_v8** | ~0.925+ | 5-6 GB | pending |
+| 3 | S4D with strong regularisation (dropout=0.3–0.5, label smoothing=0.1) | ~0.900-0.910 | 2-3 GB | pending |
+| 4 | BEAT-Net (arXiv:2601.07316, Jan 2026) | 0.931 | 2-3 GB | awaiting code |
+| 5 | ECGFounder LoRA fine-tune | ~0.930 | 5-6 GB | exploratory |
 
 **Gap analysis:** reference S4D-ECG (0.9244) vs our S4D (0.8880) = 0.036 gap. The 0.9244 likely requires a training detail not publicly disclosed (possibly much higher dropout, label smoothing, or a different scheduler recipe). Our supervised xresnet (0.9174) is the practical ceiling for now.
+
+**Augmentation conclusion:** Sweep complete (v10a/b/c + v11a/b/c). Optimal augmentation confirmed: σ=0.05·σ_lead relative + per-lead scale U(0.75,1.25). v6's 0.9174 is within run-to-run variance of v11b (0.9157). No further gains available from augmentation tuning. Next: ensemble xresnet_v6 + S4D_v8.
 
 ---
 

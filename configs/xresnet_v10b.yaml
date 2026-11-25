@@ -1,0 +1,57 @@
+# xresnet_v10b.yaml — ablación augmentación: σ=0.01, scale per-lead
+#
+# =============================================================================
+# HIPÓTESIS:
+#   v8/v9 (aug nueva) quedaron ~0.006 AUC por debajo de v6/v7.1 (aug vieja).
+#   Este experimento aísla el efecto del scale: usa per-lead U(0.75, 1.25)
+#   manteniendo σ=0.01 (el nuevo valor) y sin lead dropout.
+#   Si el scale per-lead es el factor clave, debería recuperar rendimiento.
+#
+# CAMBIOS vs v6 recipe (bandpass=true, aug nueva):
+#   + augment_scale_per_lead: true  (per-lead U(0.75,1.25), como en v6 original)
+#   = augment_noise_std: 0.01 (igual que v8/v9)
+#   = sin lead dropout
+# =============================================================================
+
+experiment:
+  name: xresnet_v10b
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+  bandpass: true
+  notch: false
+  normalization: zscore
+
+model:
+  architecture: xresnet1d50
+  num_classes: 5
+  kernel_size: 5
+  dropout: 0.5
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 50
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  early_stopping_patience: 15
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: onecycle
+  lr_onecycle_pct_start: 0.3
+  lr_onecycle_div_factor: 25.0
+  augment: true
+  augment_noise_std: 0.01
+  augment_scale_per_lead: true
+  use_pos_weight: false
+  label_smoothing: 0.0
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

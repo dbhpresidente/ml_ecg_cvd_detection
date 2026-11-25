@@ -1,0 +1,52 @@
+# xresnet_v11c.yaml — σ relativo 0.07·σ_lead, scale per-lead
+#
+# =============================================================================
+# HIPÓTESIS:
+#   Si σ relativo ayuda, más ruido adaptativo podría mejorar aún más la
+#   regularización, especialmente en clases minoritarias (HYP). Multiplicador
+#   0.07 está 40% por encima del valor original de v6 (0.05).
+# =============================================================================
+
+experiment:
+  name: xresnet_v11c
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+  bandpass: true
+  notch: false
+  normalization: zscore
+
+model:
+  architecture: xresnet1d50
+  num_classes: 5
+  kernel_size: 5
+  dropout: 0.5
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 50
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  early_stopping_patience: 15
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: onecycle
+  lr_onecycle_pct_start: 0.3
+  lr_onecycle_div_factor: 25.0
+  augment: true
+  augment_noise_std: 0.07
+  augment_noise_relative: true
+  augment_scale_per_lead: true
+  use_pos_weight: false
+  label_smoothing: 0.0
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

@@ -101,6 +101,9 @@ class TrainerConfig:
     lr_onecycle_pct_start: float = 0.3
     lr_onecycle_div_factor: float = 25.0
     augment: bool = False
+    augment_noise_std: float = 0.01
+    augment_noise_relative: bool = False
+    augment_scale_per_lead: bool = False
     use_pos_weight: bool = False
     label_smoothing: float = 0.0
     checkpoint_dir: Path = field(default_factory=lambda: Path("checkpoints"))
@@ -138,6 +141,9 @@ class _ECGDataset(Dataset):
         signals: np.ndarray,
         labels: np.ndarray,
         augment: bool = False,
+        augment_noise_std: float = 0.01,
+        augment_noise_relative: bool = False,
+        augment_scale_per_lead: bool = False,
     ) -> None:
         self.signals = torch.from_numpy(np.asarray(signals, dtype=np.float32))
         if labels.dtype == np.float32 or labels.ndim == 2:
@@ -145,6 +151,9 @@ class _ECGDataset(Dataset):
         else:
             self.labels = torch.from_numpy(np.asarray(labels, dtype=np.int64))
         self.augment = augment
+        self.augment_noise_std = augment_noise_std
+        self.augment_noise_relative = augment_noise_relative
+        self.augment_scale_per_lead = augment_scale_per_lead
 
     def __len__(self) -> int:
         return len(self.labels)
@@ -152,32 +161,45 @@ class _ECGDataset(Dataset):
     def __getitem__(self, idx: int) -> tuple["torch.Tensor", "torch.Tensor"]:
         signal = self.signals[idx].clone()
         if self.augment:
-            signal = _augment_signal(signal)
+            signal = _augment_signal(
+                signal, self.augment_noise_std, self.augment_noise_relative, self.augment_scale_per_lead
+            )
         return signal, self.labels[idx]
 
 
-def _augment_signal(x: "torch.Tensor") -> "torch.Tensor":
+def _augment_signal(
+    x: "torch.Tensor",
+    noise_std: float = 0.01,
+    noise_relative: bool = False,
+    scale_per_lead: bool = False,
+) -> "torch.Tensor":
     """Apply random augmentations to a single ECG signal (leads, samples).
-
-    Follows the Strodthoff/NeuroSyd PTB-XL benchmark augmentation protocol:
-    - Amplitude scaling: one scalar per sample (not per lead) from U(0.8, 1.2).
-      Per-lead scaling distorts inter-lead amplitude ratios that encode cardiac
-      axis information — use a single scalar applied to all leads uniformly.
-    - Gaussian noise: σ=0.01 absolute (signals are z-score normalised, O(1)).
-      Previous σ=0.05·σ_lead was 5× too aggressive, suppressing P/T-wave detail.
 
     Args:
         x: Float32 tensor of shape (n_leads, samples).
+        noise_std: Gaussian noise standard deviation. When ``noise_relative=False``,
+            applied as an absolute value. When ``noise_relative=True``, multiplied by
+            the per-lead std (``noise_std * x.std(dim=-1, keepdim=True)``), adapting
+            noise amplitude to each lead's signal level.
+        noise_relative: If True, σ is relative to per-lead std (original v6 behaviour).
+            If False, σ is absolute.
+        scale_per_lead: If True, scale each lead independently from U(0.75, 1.25).
+            If False, use a single scalar U(0.8, 1.2) for the whole sample.
 
     Returns:
         Augmented tensor of the same shape.
     """
-    # Amplitude scaling: single scalar for the whole sample — preserves inter-lead ratios
-    scale = torch.empty(1).uniform_(0.8, 1.2)
+    if scale_per_lead:
+        scale = torch.empty(x.shape[0], 1).uniform_(0.75, 1.25)
+    else:
+        scale = torch.empty(1).uniform_(0.8, 1.2)
     x = x * scale
 
-    # Gaussian noise: σ=0.01 absolute (Strodthoff benchmark protocol)
-    x = x + torch.randn_like(x) * 0.01
+    if noise_relative:
+        std = x.std(dim=-1, keepdim=True).clamp(min=1e-6)
+        x = x + torch.randn_like(x) * (noise_std * std)
+    else:
+        x = x + torch.randn_like(x) * noise_std
 
     return x
 
@@ -233,7 +255,10 @@ class Trainer:
         cfg.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         train_loader = DataLoader(
-            _ECGDataset(X_train, y_train, augment=cfg.augment),
+            _ECGDataset(X_train, y_train, augment=cfg.augment,
+                        augment_noise_std=cfg.augment_noise_std,
+                        augment_noise_relative=cfg.augment_noise_relative,
+                        augment_scale_per_lead=cfg.augment_scale_per_lead),
             batch_size=cfg.batch_size,
             shuffle=True,
             drop_last=False,
