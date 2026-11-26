@@ -411,17 +411,18 @@ S4D supervised training is exhausted at ~0.888. xresnet ceiling is ~0.917 (v6). 
 | Rank | Config | Val AUC | Test AUC | Notes |
 |------|--------|---------|----------|-------|
 | 1 | **3-model ensemble (EF_v2 + x50_v6 + x101_v7.1, 40/30/30)** | **0.9261** | **0.9243** | **Best overall — ≈ S4D-ECG ref (0.9244)** |
-| 2 | Ensemble ECGFounder_v2 + xresnet50_v6 (50/50) | 0.9246 | 0.9225 | ≥0.920 target met |
-| 3 | Ensemble xresnet50_v6 + xresnet101_v7.1 (60/40) | 0.9213 | 0.9164 | Best xresnet-only ensemble |
-| 4 | Ensemble xresnet50_v6 + S4D_v8 (90/10) | 0.9184 | 0.9125 | Marginal gain |
-| 5 | ECGFounder_lora_v2 (rank=16, single model) | 0.9177 | 0.9176 | Best foundation model single |
-| 6 | xresnet1d50_v6 (single model best) | 0.9174 | 0.9104 | xresnet ceiling |
-| 7 | ECGFounder_lora_v1 (rank=8) | 0.9168 | — | Saturated ep7 |
-| 8 | xresnet1d101_v7.1 | 0.9161 | 0.9128 | — |
-| 9 | xresnet_v11b (aug sweep best) | 0.9157 | — | — |
-| 10 | ECGFounder_lora_v3 (partial unfreeze) | 0.9120 | — | Overfit |
-| 11 | xresnet_v12 (label smoothing ε=0.1) | 0.9119 | — | Regressed |
-| 12 | S4D_v8 (best single S4D) | 0.8880 | 0.8867 | Structural ceiling |
+| 2 | Stacking-on-ensemble (5 ens probs + 40 clinical, LR C=0.1) | 0.9293 | 0.9240 | HYP=0.8797 (+0.018 vs ensemble) |
+| 3 | Ensemble ECGFounder_v2 + xresnet50_v6 (50/50) | 0.9246 | 0.9225 | ≥0.920 target met |
+| 4 | Ensemble xresnet50_v6 + xresnet101_v7.1 (60/40) | 0.9213 | 0.9164 | Best xresnet-only ensemble |
+| 5 | Ensemble xresnet50_v6 + S4D_v8 (90/10) | 0.9184 | 0.9125 | Marginal gain |
+| 6 | ECGFounder_lora_v2 (rank=16, single model) | 0.9177 | 0.9176 | Best foundation model single |
+| 7 | xresnet1d50_v6 (single model best) | 0.9174 | 0.9104 | xresnet ceiling |
+| 8 | ECGFounder_lora_v1 (rank=8) | 0.9168 | — | Saturated ep7 |
+| 9 | xresnet1d101_v7.1 | 0.9161 | 0.9128 | — |
+| 10 | xresnet_v11b (aug sweep best) | 0.9157 | — | — |
+| 11 | ECGFounder_lora_v3 (partial unfreeze) | 0.9120 | — | Overfit |
+| 12 | xresnet_v12 (label smoothing ε=0.1) | 0.9119 | — | Regressed |
+| 13 | S4D_v8 (best single S4D) | 0.8880 | 0.8867 | Structural ceiling |
 
 **Targets:**
 - ≥0.920 (beat S4D-ECG ref 0.9244): **REACHED** — 2-model ensemble ECGFounder_v2 + xresnet50_v6, test=0.9225
@@ -443,10 +444,11 @@ S4D supervised training is exhausted at ~0.888. xresnet ceiling is ~0.917 (v6). 
 |----------|----------|-------------|--------|
 | ~~1~~ | ~~ECGFounder LoRA + 2-model ensemble~~ | ~~0.920+~~ | **DONE** — test=0.9225, ≥0.920 reached |
 | ~~2~~ | ~~3-model ensemble (EF_v2 + x50_v6 + x101_v7.1)~~ | ~~0.924+~~ | **DONE** — test=0.9243, ≈ S4D-ECG ref |
-| 3 | Staged ECGFounder fine-tuning (gradual unfreeze, strong regularisation) | 0.927+ | High risk — v3 showed overfit at 13.9M params |
-| 4 | Larger xresnet101 fine-tune with aug + label smoothing | 0.925+ | Diminishing returns territory |
+| ~~3~~ | ~~Late fusion with PTB-XL+ clinical features (12SL)~~ | ~~0.925+~~ | **DONE** — stacking-on-ens test=0.9240 (−0.0003 macro; HYP +0.018). §9. |
+| 4 | Staged ECGFounder fine-tuning (gradual unfreeze, strong regularisation) | 0.927+ | High risk — v3 showed overfit at 13.9M params |
+| 5 | ≥0.930 (match Strodthoff benchmark, 10× more data or new arch) | 0.930+ | Out of scope for current thesis |
 
-**Current state:** Both ≥0.920 and ≈ S4D-ECG reference targets reached. Project is in a solid state for thesis submission. All obvious ensemble combinations explored.
+**Current state:** Both ≥0.920 and ≈ S4D-ECG reference targets reached. Clinical feature fusion explored (§9) — macro AUC essentially unchanged but HYP significantly improved. Project is in a solid state for thesis submission.
 
 ---
 
@@ -497,6 +499,91 @@ forward: F.linear(x, W, b) + (x @ lora_A.T @ lora_B.T) * (alpha / rank)
 
 ---
 
+## 9. Clinical Feature Fusion — PTB-XL+ (Nov 2026)
+
+**Goal:** Test whether pre-extracted clinical biomarkers from PTB-XL+ improve macro AUC or HYP AUC on top of the best DL ensemble.
+
+**Script:** `scripts/feature_fusion.py`  
+**Dataset:** PTB-XL+ (Wagner et al., Sci. Data 2023) — 21,799 records, 3 algorithm outputs. Used `12sl_features.csv` (782 features, GE MUSE 12SL algorithm).  
+**Coverage:** all 21,799 PTB-XL records present in 12SL output (100% overlap train/val/test).
+
+### 9.1 Feature Selection
+
+**Candidate pool:** 52 clinically motivated features (global intervals: QRS_Dur, QT_Int, PR_Int, HR, R-axis; HYP voltages: R_Amp_aVL, S_Amp_V1, R/S_Amp_V5/V6/V3; ST amplitude per 12 leads; T amplitude per 12 leads; Q amplitude per key leads; R amplitude V1–V4) + 2 derived (Sokolow-Lyon = |S_V1| + max(R_V5, R_V6), Cornell = R_aVL + |S_V3|).
+
+**Selection method:** Per-feature mean AUROC across 5 classes on train set (feature flipped if < 0.5). Top-40 kept; derived features always included.
+
+**Top-10 features by mean AUROC (train):**
+
+| Feature | Mean AUROC |
+|---------|-----------|
+| T_Amp_aVR | 0.750 |
+| T_Amp_V6 | 0.739 |
+| T_Amp_V5 | 0.727 |
+| T_Amp_I | 0.726 |
+| T_Amp_II | 0.721 |
+| ST_Amp_V6 | 0.677 |
+| ST_Amp_aVR | 0.668 |
+| ST_Amp_V5 | 0.664 |
+| T_Amp_V4 | 0.661 |
+| ST_Amp_I | 0.656 |
+
+T-wave and ST amplitudes dominate — directly reflect repolarisation abnormalities (MI, STTC, HYP).
+
+### 9.2 Experiment Design
+
+Three fusion architectures compared:
+
+| Condition | Input dim | Meta-learner |
+|-----------|-----------|--------------|
+| A — DL probs only | 15 (5×3 model probs) | LR C=0.1 |
+| B — Clinical only | 40 | LR C=0.1 |
+| C — Full fusion (15+40) | 55 | LR C=0.1 |
+| D — Ensemble probs only | 5 (40/30/30 avg) | LR C=0.01 |
+| **E — Stacking-on-ensemble** | **45 (5 ens + 40 clin)** | **LR C=0.1** |
+
+**Baseline:** 3-model 40/30/30 simple average (val=0.9261, test=0.9243).
+
+### 9.3 Results
+
+| Config | Val AUC | Test AUC | HYP test |
+|--------|---------|----------|----------|
+| Baseline (3-model avg) | 0.9261 | 0.9243 | 0.8615 |
+| A — DL-only (15→LR) | 0.9170 | 0.9148 | 0.8379 |
+| B — Clinical-only (40→LR) | 0.8717 | 0.8566 | 0.8435 |
+| C — Full fusion (55→LR) | 0.9251 | 0.9204 | 0.8717 |
+| D — Ens-only (5→LR) | 0.9116 | 0.9104 | 0.8233 |
+| **E — Stacking-on-ens (45→LR)** | **0.9293** | **0.9240** | **0.8797** |
+
+**Per-class test (best config E):**
+
+| Class | Baseline | Stacking |
+|-------|----------|----------|
+| NORM  | 0.9483   | 0.9459   |
+| MI    | 0.9370   | 0.9288   |
+| STTC  | 0.9379   | 0.9359   |
+| CD    | 0.9367   | 0.9296   |
+| **HYP** | 0.8615 | **0.8797** |
+| **Macro** | **0.9243** | **0.9240** |
+
+### 9.4 Key Findings
+
+1. **Macro AUC essentially unchanged** (−0.0003). Stacking-on-ensemble correctly inherits the optimal 40/30/30 weighting from the DL ensemble and can only add marginal information on top — the signal space is saturated at this scale.
+
+2. **Full fusion (C) regresses −0.0038.** Root cause: the LR over 15 individual probs (condition A, test=0.9148) cannot replicate the optimal 40/30/30 average, so it starts from a weaker base. Clinical features partially compensate but do not close the gap.
+
+3. **HYP improves significantly: +0.018 test** (0.8615 → 0.8797). Repolarisation biomarkers (T_Amp and ST_Amp across lateral leads) provide direct HYP discriminability that the DL models cannot fully extract from raw signal in a single forward pass. This is clinically meaningful: voltage criteria (Sokolow-Lyon, Cornell) and T-wave axis are the standard ECG criteria for HYP diagnosis.
+
+4. **Architecture matters for stacking.** Using the ensemble output as input (condition E) outperforms using individual model probs (condition C) by +0.0036 test AUC. The key insight: a meta-learner that starts from the optimal weighted average only needs to learn the clinical adjustment, not re-derive the inter-model weights.
+
+5. **Stacking val=0.9293 > baseline val=0.9261.** The improvement is consistent on val but collapses on test (0.9240 ≈ 0.9243). Likely explanation: test-set variance (2,158 records), combined with the meta-learner fitting residual val-specific patterns that do not generalise. A larger test set would be needed to confirm whether the HYP gain is a true signal or variance.
+
+6. **Clinical features alone (B) reach 0.8566 test.** Not competitive with DL but confirms the features are informative — they just carry a different signal modality that complements but cannot replace learned representations.
+
+**Conclusion:** Late fusion with PTB-XL+ 12SL features does not improve macro AUC beyond the DL ensemble (plateau effect). The main value is **HYP improvement (+0.018)**, which could matter clinically. The correct fusion architecture is stacking-on-ensemble, not stacking on individual model probabilities.
+
+---
+
 ## 8. Infrastructure Notes
 
 - **Ritmo por epoch:** xresnet1d50 ≈1.5 min; xresnet1d101 ≈3.5 min; S4D (d_model=256) ≈17 min; S4D v3 (d_model=128, d_state=8) estimated ≈3-5 min
@@ -513,3 +600,4 @@ forward: F.linear(x, W, b) + (x @ lora_A.T @ lora_B.T) * (alpha / rank)
 - NeuroSyd/S4D-ECG repository: [github.com/NeuroSyd/S4D-ECG](https://github.com/NeuroSyd/S4D-ECG)
 - Mert YE, Akdoğan E, Üvet H. "Multi-Label 12-Lead ECG Classification on the PTB-XL Dataset." arXiv:2609.12803 (2026). [UNVERIFIED — verify before citing]
 - Li et al. "ECGFounder: Towards Large-Scale Foundation Model for Electrocardiogram." NEJM AI (2025). arXiv: [2410.04133](https://arxiv.org/abs/2410.04133). HuggingFace: PKUDigitalHealth/ECGFounder
+- Wagner P, Strodthoff N, Bousseljot RD, et al. "PTB-XL+, a comprehensive electrocardiographic feature dataset." *Scientific Data* 10, 279 (2023). DOI: [10.1038/s41597-023-02153-8](https://doi.org/10.1038/s41597-023-02153-8)
