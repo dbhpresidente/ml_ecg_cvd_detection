@@ -1,0 +1,58 @@
+# ecgfounder_lora_v2.yaml — ECGFounder LoRA rank=16 (vs rank=8 en v1)
+#
+# =============================================================================
+# CAMBIO vs v1:
+#   lora_rank: 8  ->  16   (duplica parametros LoRA ~277K -> ~550K)
+#   lora_alpha: 16 -> 32   (mantiene scale = alpha/rank = 2.0)
+#   early_stopping_patience: 10 -> 15  (v1 saturó en ep7, más margen)
+#
+# HIPÓTESIS: rank=8 era el cuello de botella — el modelo saturó en ep7
+# con val_auc=0.9168. Doblar el rango permite proyecciones más ricas en
+# los SE modules y debería empujar hacia >=0.920.
+# =============================================================================
+
+experiment:
+  name: ecgfounder_lora_v2
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+  bandpass: false
+  notch: false
+  normalization: zscore
+
+model:
+  architecture: ecgfounder_lora
+  num_classes: 5
+  lora_rank: 16
+  lora_alpha: 32.0
+  checkpoint: null
+  hf_cache_dir: checkpoints/ecgfounder
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 30
+  batch_size: 32
+  learning_rate: 5.0e-4
+  weight_decay: 1.0e-4
+  early_stopping_patience: 15
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: onecycle
+  lr_onecycle_pct_start: 0.1
+  lr_onecycle_div_factor: 10.0
+  augment: true
+  augment_noise_std: 0.05
+  augment_noise_relative: true
+  augment_scale_per_lead: true
+  use_pos_weight: false
+  label_smoothing: 0.0
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

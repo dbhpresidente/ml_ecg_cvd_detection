@@ -1,0 +1,70 @@
+# ecgfounder_lora_v1.yaml — ECGFounder fine-tuning con LoRA
+#
+# =============================================================================
+# MODELO: ECGFounder (Li et al., NEJM AI 2025)
+#   - Arquitectura: Net1D (RegNet-style CNN), 33.8M params
+#   - Pretrenado: 10M+ ECGs de MIMIC-IV + Partners HealthCare
+#   - Checkpoint HF: PKUDigitalHealth/ECGFounder / 12_lead_ECGFounder.pth
+#   - Paper: arxiv.org/abs/2410.04133
+#
+# ESTRATEGIA LoRA:
+#   - Backbone Conv: FROZEN (33.3M params sin gradiente)
+#   - SE modules (se_fc1, se_fc2): LoRALinear rank=8, alpha=16
+#     * 22 BasicBlocks × 2 capas SE = 44 LoRALinear
+#   - Clasificador (dense): nn.Linear(1024, 5) NUEVO, entrenado desde cero
+#   - Trainable: ~300-500K params (< 1.5% del total)
+#
+# PREPROCESAMIENTO (protocolo ECGFounder):
+#   - bandpass: false, notch: false
+#   - normalization: zscore
+#   - sampling_rate: 500 Hz (= nuestro pipeline)
+#
+# HIPÓTESIS: AUC >= 0.920 — features de 10M ECGs capturan patrones
+# que el xresnet1d50 (17K muestras) no puede aprender desde cero.
+# =============================================================================
+
+experiment:
+  name: ecgfounder_lora_v1
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+  bandpass: false          # ECGFounder pretrained SIN filtrado
+  notch: false
+  normalization: zscore
+
+model:
+  architecture: ecgfounder_lora
+  num_classes: 5
+  lora_rank: 8
+  lora_alpha: 16.0
+  checkpoint: null         # null = download automático desde HuggingFace
+  hf_cache_dir: checkpoints/ecgfounder
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 30               # Menos epochs: partimos de features pretrenados
+  batch_size: 32
+  learning_rate: 5.0e-4    # Menor que xresnet (fine-tuning, no scratch)
+  weight_decay: 1.0e-4
+  early_stopping_patience: 10
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: onecycle
+  lr_onecycle_pct_start: 0.1   # Warmup corto: 3 epochs (10% de 30)
+  lr_onecycle_div_factor: 10.0
+  augment: true
+  augment_noise_std: 0.05
+  augment_noise_relative: true
+  augment_scale_per_lead: true
+  use_pos_weight: false
+  label_smoothing: 0.0
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/

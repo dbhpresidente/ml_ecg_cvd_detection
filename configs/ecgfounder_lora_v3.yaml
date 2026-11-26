@@ -1,0 +1,65 @@
+# ecgfounder_lora_v3.yaml — partial unfreeze: LoRA stages 0-5 + stage 6 full ft
+#
+# =============================================================================
+# DIAGNOSIS v1/v2: pico en ep7 en ambos runs. El backbone congelado crea una
+# representación fija que el LoRA de los SE modules no puede superar.
+# rank=16 vs rank=8: solo +0.0009 — el bottleneck no es el rank.
+#
+# CAMBIO vs v2:
+#   unfreeze_last_n_stages: 0 -> 1  (stage 6: 4 blocks, 1024 channels)
+#   Trainable: ~550K -> ~13.9M (54.2% del total)
+#   Stages 0-5: LoRA rank=8 en SE modules (frozen conv)
+#   Stage 6: TODOS los params trainable (full fine-tuning)
+#
+# AJUSTE de hiperparametros para más params adaptativos:
+#   lr: 5e-4 -> 3e-4  (más conservador con 13.9M params)
+#   weight_decay: 1e-4 -> 3e-4  (más regularización)
+#   early_stopping_patience: 15 -> 10  (frenar overfitting antes)
+# =============================================================================
+
+experiment:
+  name: ecgfounder_lora_v3
+  seed: 42
+
+data:
+  raw_dir: data/raw/ptb-xl
+  mode: multilabel
+  sampling_rate: 500
+  leads: 12
+  min_confidence: 0.0
+  bandpass: false
+  notch: false
+  normalization: zscore
+
+model:
+  architecture: ecgfounder_lora
+  num_classes: 5
+  lora_rank: 8
+  lora_alpha: 16.0
+  unfreeze_last_n_stages: 1    # stage 6 (1024 ch, 4 blocks) fully trainable
+  checkpoint: null
+  hf_cache_dir: checkpoints/ecgfounder
+
+training:
+  mode: multilabel
+  num_classes: 5
+  epochs: 30
+  batch_size: 32
+  learning_rate: 3.0e-4
+  weight_decay: 3.0e-4
+  early_stopping_patience: 10
+  use_amp: true
+  gradient_clip_val: 1.0
+  scheduler_name: onecycle
+  lr_onecycle_pct_start: 0.1
+  lr_onecycle_div_factor: 10.0
+  augment: true
+  augment_noise_std: 0.05
+  augment_noise_relative: true
+  augment_scale_per_lead: true
+  use_pos_weight: false
+  label_smoothing: 0.0
+
+logging:
+  output_dir: outputs/
+  checkpoint_dir: checkpoints/
